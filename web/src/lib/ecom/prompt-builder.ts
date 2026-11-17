@@ -3,7 +3,7 @@ import type { EcomPalette, EcomStyle } from "@/constant/ecom/styles";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { describeColor } from "@/lib/ecom/main-color";
 import { buildFramingBlock } from "@/lib/ecom/framing";
-import type { EcomAnglePolicy, EcomProductAnalysis, EcomReferenceDigest, EcomReferenceMode, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
+import type { EcomAnglePolicy, EcomProductAnalysis, EcomProductProfile, EcomReferenceDigest, EcomReferenceMode, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
 
 type DigestTextField = "scene" | "lighting" | "composition" | "texture";
 
@@ -42,6 +42,8 @@ function mergeAvoid(digests: EcomReferenceDigest[]) {
 
 export type BuildEcomPromptInput = {
     analysis: EcomProductAnalysis;
+    /** 品牌方维护的产品身份、卖点与不可变特征。 */
+    profile?: EcomProductProfile;
     style: EcomStyle;
     angle: EcomAngleId;
     palette: EcomPalette;
@@ -124,7 +126,7 @@ export function looksLikeProductEdit(text?: string) {
     return PRODUCT_EDIT_HINTS.some((pattern) => pattern.test(value));
 }
 
-export function buildEcomPrompt({ analysis, style, angle, palette, digests = [], anglePolicy = "keep", withReferenceImage = false, showRiser = false, extraPrompt = "", frameRatio = "1:1", subjectScale = "auto", subjectAnchor = "center", subjectBox = null, framingLocked = false, platformNote = "", propsNote = "", colorNotes = "" }: BuildEcomPromptInput) {
+export function buildEcomPrompt({ analysis, profile, style, angle, palette, digests = [], anglePolicy = "keep", withReferenceImage = false, showRiser = false, extraPrompt = "", frameRatio = "1:1", subjectScale = "auto", subjectAnchor = "center", subjectBox = null, framingLocked = false, platformNote = "", propsNote = "", colorNotes = "" }: BuildEcomPromptInput) {
     const productLabel = imageReferenceLabel(0);
     const referenceLabel = imageReferenceLabel(1);
     const angleSpec = findEcomAngle(angle);
@@ -175,6 +177,14 @@ export function buildEcomPrompt({ analysis, style, angle, palette, digests = [],
     );
 
     const productShape = [analysis.subject, analysis.structure].filter(Boolean).join(" — ");
+    const identity = [profile?.brand, profile?.name, profile?.model].map(normalizeExtraPrompt).filter(Boolean).join(" · ");
+    const productBrief = [
+        identity ? `Commercial identity: ${identity}.` : "",
+        profile?.sellingPoints ? `Key selling points: ${normalizeExtraPrompt(profile.sellingPoints)}. Show these advantages through the most truthful visible angle, lighting and use context only; never turn them into invented product features, text, badges or diagrams.` : "",
+        profile?.mustKeep ? `Non-negotiable product traits: ${normalizeExtraPrompt(profile.mustKeep)}. Every named trait must remain exactly as photographed in ${productLabel}; scene styling can never cover, replace or reinterpret it.` : "",
+        profile?.audience ? `Intended buyer and use context: ${normalizeExtraPrompt(profile.audience)}. Use this only to choose believable surroundings and secondary props; do not stereotype a person or redesign the product.` : "",
+    ].filter(Boolean);
+    const productBriefBlock = productBrief.length ? `[Product brief]\n${productBrief.join("\n")}` : "";
     /*
      * 手写补充只做场景层的加法，而不是替换风格。
      * 说「the scene described above」而不是「this style」：参考图拆解出来的场景也拼在 [Scene] 里，
@@ -253,6 +263,7 @@ export function buildEcomPrompt({ analysis, style, angle, palette, digests = [],
         `[Priority]\nPreserving ${multiItem ? `the product set in ${productLabel} — all ${itemCount} units —` : `the product in ${productLabel}`} outranks every instruction below. Where the scene, lighting or style request conflicts with keeping ${multiItem ? "the set" : "the product"} intact, keep ${multiItem ? "the set" : "the product"} and soften the conflict.`,
         `[Image roles]\n${productLabel} = ${multiItem ? `the set of ${itemCount} products to preserve, all of them` : "the product to preserve"}.${withReferenceImage ? ` ${referenceLabel} = environment reference only, never use it as the subject.` : ""}`,
         productLock,
+        ...(productBriefBlock ? [productBriefBlock] : []),
         `[Product finish]\nKeep the original material and surface finish${finishText ? `: ${finishText}` : ""}. Preserve the original highlight position, intensity and surface grain.\nA matte surface stays matte, a brushed surface keeps its grain direction, a glossy surface keeps its reflection shape. Never change the finish, over-polish the surface, or swap one material for another.`,
         `[Branding]\nKeep every logo, label, print and its position unchanged. Do not add new text, price tags, badges or promotional marks, and never invent characters that are not in ${productLabel}.${analysis.labelText ? `\nThe visible text on the product reads "${analysis.labelText}" — reproduce it without alteration.` : ""}`,
         ...(CONTROL_CATEGORIES.includes(analysis.category)

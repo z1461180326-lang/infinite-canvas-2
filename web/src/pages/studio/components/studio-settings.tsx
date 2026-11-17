@@ -93,7 +93,7 @@ export function StudioSettings({ config, onModelChange }: { config: AiConfig; on
     const framingHint = framingAuto ? "" : t("studio.settings.framingHintValue", { ratio, percent: Math.round(framingBox.w) });
 
     return (
-        <StudioSection index="04" title={t("studio.settings.title")}>
+        <StudioSection index="05" title={t("studio.settings.title")}>
             <span className={FIELD_LABEL}>{t("studio.settings.angle")}</span>
             {/* 分段控件比两个各自带框的按钮更能表达「二选一」；窄栏里两个选项等宽并排，不再上下错行 */}
             <div className="flex rounded-lg border border-border/80 bg-muted/40 p-0.5">

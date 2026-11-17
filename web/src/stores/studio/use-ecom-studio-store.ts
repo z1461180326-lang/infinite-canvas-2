@@ -8,7 +8,7 @@ import { boxFromScale } from "@/lib/ecom/framing";
 import { ECOM_EXTRA_PROMPT_MAX } from "@/lib/ecom/prompt-builder";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { resolveImageUrl } from "@/services/image-storage";
-import type { EcomAnglePolicy, EcomProductAnalysis, EcomReferenceDigest, EcomReferenceMode, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
+import type { EcomAnglePolicy, EcomProductAnalysis, EcomProductProfile, EcomReferenceDigest, EcomReferenceMode, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
 import type { ReferenceImage } from "@/types/image";
 
 /** 参考图与其拆解进度。拆解失败只影响这一张，不阻塞出图。 */
@@ -55,6 +55,8 @@ type EcomStudioStore = {
      * 没有色号时 [Color] 只剩一句「保持原样」，浅色产品几乎一定会被改色。
      */
     productColor?: string;
+    /** 品牌方手动维护的产品身份、卖点与不可变特征。 */
+    productProfile: EcomProductProfile;
 
     /**
      * 自建的「视觉配方」风格 id。
@@ -111,6 +113,7 @@ type EcomStudioStore = {
     setCategory: (category: EcomCategoryId, subject?: string) => void;
     /** 写入本地采样的主色；已有 analysis 时顺手补进去，保持单一数据源。 */
     setProductColor: (hex?: string) => void;
+    setProductProfile: (patch: Partial<EcomProductProfile>) => void;
 
     selectStyle: (id?: string) => void;
     setPaletteIndex: (index: number) => void;
@@ -170,6 +173,15 @@ const PREFERENCE_DEFAULTS = {
     visionModel: "",
 };
 
+const EMPTY_PRODUCT_PROFILE: EcomProductProfile = {
+    name: "",
+    brand: "",
+    model: "",
+    sellingPoints: "",
+    mustKeep: "",
+    audience: "",
+};
+
 export const useEcomStudioStore = create<EcomStudioStore>()(
     persist(
         (set, get) => ({
@@ -180,6 +192,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
             generating: false,
             // 手写补充属于本次内容，不算偏好，故意不进 partialize：换产品/刷新后不会悄悄带上一段旧要求
             extraPrompt: "",
+            productProfile: EMPTY_PRODUCT_PROFILE,
             ...PREFERENCE_DEFAULTS,
 
             setProduct: (image) =>
@@ -197,6 +210,8 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                         categoryLocked: false,
                         // 采样色属于这张产品图，换图必须清掉，否则会拿上一件的色号锁新图
                         productColor: undefined,
+                        // 更换角度图通常还是同一 SKU，保留档案；明确移除产品时再一起清空
+                        productProfile: image ? state.productProfile : EMPTY_PRODUCT_PROFILE,
                         references: [],
                         // 已生成的结果自带风格与提示词快照，跟当前产品图无关；删产品图不该把历史记录一起清掉
                         results: state.results,
@@ -225,6 +240,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                     if (state.analysis.mainColor) return { productColor };
                     return { productColor, analysis: { ...state.analysis, mainColor: productColor } };
                 }),
+            setProductProfile: (patch) => set((state) => ({ productProfile: { ...state.productProfile, ...patch } })),
             setCategory: (category, subject) =>
                 set((state) => ({
                     categoryLocked: true,
@@ -311,6 +327,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                     analysisError: undefined,
                     categoryLocked: false,
                     productColor: undefined,
+                    productProfile: EMPTY_PRODUCT_PROFILE,
                     references: [],
                     results: [],
                     generating: false,
@@ -359,6 +376,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                 showRiser: state.showRiser,
                 model: state.model,
                 visionModel: state.visionModel,
+                productProfile: state.productProfile,
                 results: state.results.map((item) => ({ ...item, dataUrl: "" })),
             }),
             onRehydrateStorage: () => () => {

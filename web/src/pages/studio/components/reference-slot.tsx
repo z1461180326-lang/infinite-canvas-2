@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { blobToDataUrl, createImageThumbnail } from "@/lib/image-thumbnail";
 import { styleFromDigests } from "@/lib/ecom/style-registry";
+import { useImageDropPaste } from "@/hooks/use-image-drop-paste";
 import { cn } from "@/lib/utils";
 import { analyzeReference } from "@/services/api/ecom";
 import { uploadImage } from "@/services/image-storage";
@@ -139,10 +140,11 @@ export function ReferenceSlot({ config }: { config: AiConfig }) {
     );
 
     const canAdd = Boolean(productImage) && references.length < MAX_REFERENCES;
+    const { dragging, dropProps } = useImageDropPaste({ enabled: canAdd, onFile: acceptFile });
 
     return (
         <StudioSection
-            index="03"
+            index="04"
             title={t("studio.reference.title")}
             note={t("studio.reference.optional")}
             actions={
@@ -166,9 +168,10 @@ export function ReferenceSlot({ config }: { config: AiConfig }) {
                 }}
             />
 
-            {references.length ? (
-                // 窄栏里纵向排一行一张：缩略图 + 用途 + 拆解状态 / 删除，比并排大卡省一半高度
-                <div className="space-y-1.5">
+            <div {...dropProps} className={cn("rounded-lg transition", dragging && "ring-2 ring-primary/40 ring-offset-2 ring-offset-card")}>
+                {references.length ? (
+                    // 窄栏里纵向排一行一张：缩略图 + 用途 + 拆解状态 / 删除，比并排大卡省一半高度
+                    <div className="space-y-1.5">
                     {references.map((item) => {
                         const mode = MODES.find((entry) => entry.value === item.mode);
                         const summary = digestSummary(item.digest);
@@ -224,28 +227,29 @@ export function ReferenceSlot({ config }: { config: AiConfig }) {
                             className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-xs text-muted-foreground transition hover:border-primary/40 hover:bg-muted/40 hover:text-foreground"
                         >
                             {uploading ? <Spin size="small" /> : <ImagePlus className="size-3.5" />}
-                            {t("studio.reference.add")}
+                            {t("studio.reference.addHint")}
                             <span className="tabular-nums opacity-60">
                                 {references.length}/{MAX_REFERENCES}
                             </span>
                         </button>
                     ) : null}
-                </div>
-            ) : (
-                <button
-                    type="button"
-                    disabled={!productImage}
-                    onClick={() => inputRef.current?.click()}
-                    className={cn(
-                        // 和产品图上传区同高：两列并排时标题、上传框、下一块的水平线都能对齐
-                        "flex min-h-[6.5rem] w-full items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-3 transition",
-                        productImage ? "border-border hover:border-primary/40 hover:bg-muted/40" : "cursor-not-allowed border-border/60 opacity-55",
-                    )}
-                >
-                    {uploading ? <Spin size="small" /> : <ImagePlus className="size-5 shrink-0 text-muted-foreground" />}
-                    <span className="truncate text-xs text-muted-foreground">{t("studio.reference.empty")}</span>
-                </button>
-            )}
+                    </div>
+                ) : (
+                    <button
+                        type="button"
+                        disabled={!productImage}
+                        onClick={() => inputRef.current?.click()}
+                        className={cn(
+                            // 和产品图上传区同高：两列并排时标题、上传框、下一块的水平线都能对齐
+                            "flex min-h-[6.5rem] w-full items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-3 transition",
+                            productImage ? "border-border hover:border-primary/40 hover:bg-muted/40" : "cursor-not-allowed border-border/60 opacity-55",
+                        )}
+                    >
+                        {uploading ? <Spin size="small" /> : <ImagePlus className="size-5 shrink-0 text-muted-foreground" />}
+                        <span className="truncate text-xs text-muted-foreground">{t("studio.reference.empty")}</span>
+                    </button>
+                )}
+            </div>
         </StudioSection>
     );
 }

@@ -48,7 +48,7 @@ export function StyleGrid({ categoryId, coveredFields, onOpenManager }: { catego
 
     return (
         <StudioSection
-            index="05"
+            index="06"
             title={t("studio.style.titleCustom")}
             collapsible
             collapseKey="recipe"

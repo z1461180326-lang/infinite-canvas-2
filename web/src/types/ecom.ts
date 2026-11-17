@@ -34,6 +34,19 @@ export type EcomProductAnalysis = {
     avoid?: string[];
 };
 
+/**
+ * 品牌方手动维护的产品档案。
+ * 视觉识别只负责「看见了什么」，这里负责「这款产品是谁、为什么买、什么绝不能改」。
+ */
+export type EcomProductProfile = {
+    name: string;
+    brand: string;
+    model: string;
+    sellingPoints: string;
+    mustKeep: string;
+    audience: string;
+};
+
 /** 参考图拆解模式，每种模式只允许写对应字段。 */
 export type EcomReferenceMode = "style" | "scene" | "layout" | "color" | "texture";
 

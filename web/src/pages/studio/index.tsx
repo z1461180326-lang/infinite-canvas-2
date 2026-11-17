@@ -22,6 +22,7 @@ import type { ReferenceImage } from "@/types/image";
 import { ExtraPromptField } from "./components/extra-prompt-field";
 import { LookPicker } from "./components/look-picker";
 import { ProductUploader } from "./components/product-uploader";
+import { ProductProfile } from "./components/product-profile";
 import { ReferenceSlot } from "./components/reference-slot";
 import { ResultGrid } from "./components/result-grid";
 import { StudioSettings } from "./components/studio-settings";
@@ -39,6 +40,7 @@ export default function EcomStudioPage() {
 
     const productImage = useEcomStudioStore((state) => state.productImage);
     const analysis = useEcomStudioStore((state) => state.analysis);
+    const productProfile = useEcomStudioStore((state) => state.productProfile);
     const paletteIndex = useEcomStudioStore((state) => state.paletteIndex);
     const anglePolicy = useEcomStudioStore((state) => state.anglePolicy);
     const targetAngle = useEcomStudioStore((state) => state.targetAngle);
@@ -126,6 +128,7 @@ export default function EcomStudioPage() {
 
             const prompt = buildEcomPrompt({
                 analysis: analysis ?? { category: "other", subject: "the product" },
+                profile: productProfile,
                 style,
                 angle: angleId,
                 palette,
@@ -200,6 +203,7 @@ export default function EcomStudioPage() {
         message,
         paletteIndex,
         productImage,
+        productProfile,
         ratio,
         references,
         scale,
@@ -270,13 +274,14 @@ export default function EcomStudioPage() {
                                 <div className="grid sm:min-h-full sm:grid-cols-2 sm:divide-x sm:divide-border">
                                     <div className="flex min-w-0 flex-col divide-y divide-border">
                                         <ProductUploader config={config} />
+                                        <ProductProfile />
                                         {/* 平台 × 场景是主路径；自定义配方排在它下面，选了才生效 */}
                                         <LookPicker onManageScenes={() => { setManagerTab("scene"); setManagerOpen(true); }} />
                                         <StyleGrid categoryId={analysis?.category} coveredFields={coveredFields} onOpenManager={() => { setManagerTab("style"); setManagerOpen(true); }} />
                                         {/*
-                                         * 手写补充独立成块，不挂在 02 里。
+                                         * 手写补充独立成块，不挂在 03 里。
                                          * 它进的是 [Operator notes]，四条生成路径共用，作用域只到场景层；
-                                         * 放在 02 会让人以为只对平台场景生效，02 一折叠还会把它一起收走。
+                                         * 放在 03 会让人以为只对平台场景生效，03 一折叠还会把它一起收走。
                                          */}
                                         <div className="px-3.5 py-2.5 sm:px-4">
                                             <ExtraPromptField bare />

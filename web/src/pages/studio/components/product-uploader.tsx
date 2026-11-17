@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from "react-i18next";
 
 import { ECOM_CATEGORIES, findEcomAngle } from "@/constant/ecom/categories";
+import { useImageDropPaste } from "@/hooks/use-image-drop-paste";
 import { sampleMainColor } from "@/lib/ecom/main-color";
 import { cn } from "@/lib/utils";
 import { analyzeProduct } from "@/services/api/ecom";
@@ -22,7 +23,6 @@ export function ProductUploader({ config }: { config: AiConfig }) {
     const inputRef = useRef<HTMLInputElement>(null);
     const analyzingRef = useRef(false);
     const [uploading, setUploading] = useState(false);
-    const [dragging, setDragging] = useState(false);
 
     const productImage = useEcomStudioStore((state) => state.productImage);
     const analysis = useEcomStudioStore((state) => state.analysis);
@@ -90,6 +90,7 @@ export function ProductUploader({ config }: { config: AiConfig }) {
         },
         [message, runAnalysis, setProduct, setProductColor, t],
     );
+    const { dragging, dropProps } = useImageDropPaste({ onFile: acceptFile });
 
     // 未配置渠道时不做无意义的识别请求；凭据挂在渠道上，按识别模型反查
     const channelReady = isModelChannelConfigured(config, resolvedVisionModel);
@@ -143,26 +144,27 @@ export function ProductUploader({ config }: { config: AiConfig }) {
                 }}
             />
 
-            {productImage ? (
-                <div className="flex items-start gap-3">
-                    {/* 点缩略图直接换图，省掉「先移除再上传」两步 */}
-                    <button
-                        type="button"
-                        onClick={() => inputRef.current?.click()}
-                        className="group relative size-[5.5rem] shrink-0 overflow-hidden rounded-xl border border-border bg-muted transition focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
-                    >
-                        <img src={productImage.dataUrl} alt={productImage.name} className="size-full object-contain"  loading="lazy" decoding="async"/>
-                        <span className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs font-medium text-foreground opacity-0 transition group-hover:opacity-100">
-                            {uploading ? <Spin size="small" /> : t("studio.product.replace")}
-                        </span>
-                        {analysisStatus === "analyzing" ? (
-                            <span className="absolute inset-0 flex items-center justify-center bg-background/70">
-                                <Spin size="small" />
+            <div {...dropProps} className={cn("rounded-lg transition", dragging && "ring-2 ring-primary/40 ring-offset-2 ring-offset-card")}>
+                {productImage ? (
+                    <div className="flex items-start gap-3">
+                        {/* 点缩略图直接换图，省掉「先移除再上传」两步 */}
+                        <button
+                            type="button"
+                            onClick={() => inputRef.current?.click()}
+                            className="group relative size-[5.5rem] shrink-0 overflow-hidden rounded-xl border border-border bg-muted transition focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
+                        >
+                            <img src={productImage.dataUrl} alt={productImage.name} className="size-full object-contain" loading="lazy" decoding="async" />
+                            <span className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs font-medium text-foreground opacity-0 transition group-hover:opacity-100">
+                                {uploading ? <Spin size="small" /> : t("studio.product.replace")}
                             </span>
-                        ) : null}
-                    </button>
+                            {analysisStatus === "analyzing" ? (
+                                <span className="absolute inset-0 flex items-center justify-center bg-background/70">
+                                    <Spin size="small" />
+                                </span>
+                            ) : null}
+                        </button>
 
-                    <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="min-w-0 flex-1 space-y-1.5">
                         {/* 品类下拉独占一行，chip 才不会被挤断成两行 */}
                         <Select size="small" className="w-full" value={analysis?.category ?? "other"} onChange={(value) => setCategory(value)} options={ECOM_CATEGORIES.map((item) => ({ value: item.id, label: item.name }))} />
                         <div className="flex flex-wrap items-center gap-1">
@@ -212,28 +214,19 @@ export function ProductUploader({ config }: { config: AiConfig }) {
                                 {analysis?.labelText ? t("studio.product.branding", { text: analysis.labelText }) : analysis?.subCategory ? t("studio.product.subCategoryIs", { name: analysis.subCategory.name }) : ""}
                             </p>
                         )}
+                        </div>
                     </div>
-                </div>
-            ) : (
-                <button
-                    type="button"
-                    onClick={() => inputRef.current?.click()}
-                    onDragOver={(event) => {
-                        event.preventDefault();
-                        setDragging(true);
-                    }}
-                    onDragLeave={() => setDragging(false)}
-                    onDrop={(event) => {
-                        event.preventDefault();
-                        setDragging(false);
-                        void acceptFile(event.dataTransfer.files?.[0]);
-                    }}
-                    className={cn("flex min-h-[6.5rem] w-full items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-5 transition", dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/40")}
-                >
-                    {uploading ? <Spin size="small" /> : <ImagePlus className="size-5 text-muted-foreground" />}
-                    <span className="truncate text-[12px] text-foreground">{t("studio.product.dropHint")}</span>
-                </button>
-            )}
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => inputRef.current?.click()}
+                        className={cn("flex min-h-[6.5rem] w-full items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-5 transition", dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 hover:bg-muted/40")}
+                    >
+                        {uploading ? <Spin size="small" /> : <ImagePlus className="size-5 text-muted-foreground" />}
+                        <span className="truncate text-[12px] text-foreground">{t("studio.product.dropHint")}</span>
+                    </button>
+                )}
+            </div>
         </StudioSection>
     );
 }

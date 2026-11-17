@@ -59,7 +59,7 @@ export function LookPicker({ onManageScenes }: { onManageScenes?: () => void }) 
 
     return (
         <StudioSection
-            index="02"
+            index="03"
             title={t("studio.look.title")}
             collapsible
             collapseKey="look"
