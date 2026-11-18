@@ -32,8 +32,11 @@ jobs:
           VITE_BASE: /${{ github.event.repository.name }}/
         run: bun run build
 
-      - name: Add SPA fallback
-        run: cp web/dist/index.html web/dist/404.html
+      - name: Add SPA fallback and image route
+        run: |
+          cp web/dist/index.html web/dist/404.html
+          mkdir -p web/dist/image
+          cp web/dist/index.html web/dist/image/index.html
 
       - uses: actions/configure-pages@v5
 
