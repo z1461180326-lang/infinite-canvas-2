@@ -45,6 +45,7 @@ export type BuildEcomPromptInput = {
     /** 品牌方维护的产品身份、卖点与不可变特征。 */
     profile?: EcomProductProfile;
     productViewBrief?: string;
+    personNote?: string;
     style: EcomStyle;
     angle: EcomAngleId;
     palette: EcomPalette;
@@ -127,7 +128,7 @@ export function looksLikeProductEdit(text?: string) {
     return PRODUCT_EDIT_HINTS.some((pattern) => pattern.test(value));
 }
 
-export function buildEcomPrompt({ analysis, profile, productViewBrief, style, angle, palette, digests = [], anglePolicy = "keep", withReferenceImage = false, showRiser = false, extraPrompt = "", frameRatio = "1:1", subjectScale = "auto", subjectAnchor = "center", subjectBox = null, framingLocked = false, platformNote = "", propsNote = "", colorNotes = "" }: BuildEcomPromptInput) {
+export function buildEcomPrompt({ analysis, profile, productViewBrief, personNote, style, angle, palette, digests = [], anglePolicy = "keep", withReferenceImage = false, showRiser = false, extraPrompt = "", frameRatio = "1:1", subjectScale = "auto", subjectAnchor = "center", subjectBox = null, framingLocked = false, platformNote = "", propsNote = "", colorNotes = "" }: BuildEcomPromptInput) {
     const productLabel = imageReferenceLabel(0);
     const referenceLabel = imageReferenceLabel(1);
     const angleSpec = findEcomAngle(angle);
@@ -278,6 +279,7 @@ export function buildEcomPrompt({ analysis, profile, productViewBrief, style, an
         // 平台层在场景层之前：先说清「这是哪一类图」，场景细节才不会盖过平台感
         ...(platformNote.trim() ? [platformNote.trim()] : []),
         `[Scene]\n${style.scene}${sceneText ? ` ${sceneText}` : ""}\nScene elements stay behind and around ${multiItem ? "the group" : "the product"}, never covering ${multiItem ? "any unit's" : "its"} front face.`,
+        ...(personNote ? [`[Scene model]\n${personNote}`] : []),
         supportBlock,
         // 紧接场景块：道具是场景的一部分，离开场景描述就没有确定的位置关系
         ...(propsNote.trim() ? [propsNote.trim()] : []),

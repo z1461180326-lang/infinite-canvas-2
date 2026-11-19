@@ -73,7 +73,7 @@ export default function EcomStudioPage() {
      * 用户显式挑了一套自定义配方时，它整体覆盖前两者——这是有意为之，
      * 否则「配方自带纯白背景」和「场景选了窗边」会同时写进提示词，模型只能挑一条听。
      */
-    const { look, effectiveStyle: style, customStyle, notes } = useEcomLook();
+    const { look, effectiveStyle: style, customStyle, notes, personNote } = useEcomLook();
 
     // 参考图给出机位时预填目标机位，但不强行改策略
     const referenceAngleId = useMemo(() => digestAngleOf(digests)?.id, [digests]);
@@ -133,6 +133,7 @@ export default function EcomStudioPage() {
                 analysis: analysis ?? { category: "other", subject: "the product" },
                 profile: productProfile,
                 productViewBrief,
+                personNote,
                 style,
                 angle: angleId,
                 palette,
@@ -209,6 +210,7 @@ export default function EcomStudioPage() {
         productImage,
         productProfile,
         productViewBrief,
+        personNote,
         ratio,
         references,
         scale,

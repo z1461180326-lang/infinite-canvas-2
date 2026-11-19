@@ -1,4 +1,4 @@
-import { Switch, Tooltip } from "antd";
+import { Segmented, Switch, Tooltip } from "antd";
 import { Link2, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -7,6 +7,7 @@ import { useEcomLook } from "@/lib/ecom/use-look";
 import { cn } from "@/lib/utils";
 import { useActiveEcomScenes } from "@/stores/studio/use-ecom-scene-store";
 import { useEcomStudioStore } from "@/stores/studio/use-ecom-studio-store";
+import type { EcomScenePerson } from "@/types/ecom";
 import { CopyPromptButton } from "./copy-prompt-button";
 import { SectionManageButton, StudioSection } from "./section";
 
@@ -20,10 +21,12 @@ const FIELD_LABEL = "mb-1 block text-xs font-medium text-muted-foreground";
  */
 export function LookPicker({ onManageScenes }: { onManageScenes?: () => void }) {
     const { t } = useTranslation();
-    const { look, platformsUsed, dressing, customStyle, notes, effectiveStyle } = useEcomLook();
+    const { look, platformsUsed, dressing, customStyle, notes, effectiveStyle, productOnly, personNote } = useEcomLook();
     const allScenes = useActiveEcomScenes();
     const platformId = useEcomStudioStore((state) => state.platformId);
     const sceneId = useEcomStudioStore((state) => state.sceneId);
+    const scenePerson = useEcomStudioStore((state) => state.scenePerson);
+    const setScenePerson = useEcomStudioStore((state) => state.setScenePerson);
     const linkScene = useEcomStudioStore((state) => state.linkScene);
     const analysis = useEcomStudioStore((state) => state.analysis);
     const selectPlatform = useEcomStudioStore((state) => state.selectPlatform);
@@ -53,6 +56,7 @@ export function LookPicker({ onManageScenes }: { onManageScenes?: () => void }) 
     const promptSections = [
         { key: "platform", label: t("studio.look.detailPlatform"), text: notes.platformNote },
         { key: "scene", label: t("studio.look.detailScene"), text: effectiveStyle.scene },
+        { key: "person", label: t("studio.look.person"), text: personNote },
         { key: "props", label: t("studio.look.detailProps"), text: notes.propsNote },
         { key: "color", label: t("studio.look.detailColor"), text: notes.colorNotes },
     ];
@@ -132,6 +136,22 @@ export function LookPicker({ onManageScenes }: { onManageScenes?: () => void }) 
 
             {look.usesReferenceScene ? <p className="mt-1 text-xs leading-4 text-muted-foreground">{t("studio.look.referenceSceneOn")}</p> : null}
             {sceneId === "reference" && !look.usesReferenceScene ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{t("studio.look.referenceSceneEmpty")}</p> : null}
+
+            <span className={cn(FIELD_LABEL, "mt-2.5")}>{t("studio.look.person")}</span>
+            <Segmented<EcomScenePerson>
+                aria-label={t("studio.look.person")}
+                block
+                size="small"
+                disabled={productOnly}
+                value={productOnly ? "none" : scenePerson}
+                onChange={setScenePerson}
+                options={[
+                    { value: "none", label: t("studio.look.personNone") },
+                    { value: "male", label: t("studio.look.personMale") },
+                    { value: "female", label: t("studio.look.personFemale") },
+                ]}
+            />
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{t(productOnly ? "studio.look.personProductOnly" : "studio.look.personHint")}</p>
 
             {/* 联动开关放在摘要上方：先看到「补了什么」，再决定要不要关 */}
             <div className="mt-2 flex items-center gap-2 rounded-lg border border-border/70 px-2 py-1.5">

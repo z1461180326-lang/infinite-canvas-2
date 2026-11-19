@@ -9,7 +9,7 @@ import { boxFromScale } from "@/lib/ecom/framing";
 import { ECOM_EXTRA_PROMPT_MAX } from "@/lib/ecom/prompt-builder";
 import { localForageStorage } from "@/lib/localforage-storage";
 import { collectImageStorageKeys, resolveImageUrl } from "@/services/image-storage";
-import type { EcomAnglePolicy, EcomProductAnalysis, EcomProductPhoto, EcomProductPhotos, EcomProductProfile, EcomProductView, EcomReferenceDigest, EcomReferenceMode, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
+import type { EcomAnglePolicy, EcomProductAnalysis, EcomProductPhoto, EcomProductPhotos, EcomProductProfile, EcomProductView, EcomReferenceDigest, EcomReferenceMode, EcomScenePerson, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
 import type { ReferenceImage } from "@/types/image";
 
 /** 参考图与其拆解进度。拆解失败只影响这一张，不阻塞出图。 */
@@ -78,6 +78,7 @@ type EcomStudioStore = {
     /** 物理场景。决定产品被放在哪里、承托面是什么、光从哪来。 */
     /** 内置场景 id 或自建场景 id（string）。 */
     sceneId: string;
+    scenePerson: EcomScenePerson;
     /** 属性联动：是否按识别到的材质/品类往场景里补道具。 */
     linkScene: boolean;
 
@@ -133,6 +134,7 @@ type EcomStudioStore = {
     /** 选平台会退出自定义配方：两者是同一件事的两种表达，不能同时生效。 */
     selectPlatform: (id: EcomPlatformId) => void;
     selectScene: (id: string) => void;
+    setScenePerson: (person: EcomScenePerson) => void;
     setLinkScene: (value: boolean) => void;
     setAnglePolicy: (policy: EcomAnglePolicy) => void;
     setTargetAngle: (angle?: EcomAngleId) => void;
@@ -172,6 +174,7 @@ const PREFERENCE_DEFAULTS = {
     paletteIndex: -1,
     platformId: ECOM_PLATFORM_DEFAULT as EcomPlatformId,
     sceneId: ECOM_SCENE_DEFAULT as EcomSceneId,
+    scenePerson: "none" as EcomScenePerson,
     linkScene: true,
     anglePolicy: "keep" as EcomAnglePolicy,
     ratio: "1:1",
@@ -327,6 +330,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                 set({ platformId: id, styleId: undefined, paletteIndex: -1, ratio: platform?.defaultRatio ?? get().ratio });
             },
             selectScene: (id) => set({ sceneId: id, styleId: undefined, paletteIndex: -1 }),
+            setScenePerson: (scenePerson) => set({ scenePerson }),
             setLinkScene: (linkScene) => set({ linkScene }),
             setAnglePolicy: (policy) =>
                 set((state) => ({
@@ -428,6 +432,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                 paletteIndex: state.paletteIndex,
                 platformId: state.platformId,
                 sceneId: state.sceneId,
+                scenePerson: state.scenePerson,
                 linkScene: state.linkScene,
                 anglePolicy: state.anglePolicy,
                 ratio: state.ratio,

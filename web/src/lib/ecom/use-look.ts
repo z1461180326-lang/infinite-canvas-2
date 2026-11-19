@@ -2,6 +2,7 @@ import { useMemo } from "react";
 
 import type { EcomStyle } from "@/constant/ecom/styles";
 import { composeLook, composePlatformNote, type EcomLook } from "@/lib/ecom/look-composer";
+import { sceneFamilyOf } from "@/lib/ecom/scene-registry";
 import { useActiveEcomScenes } from "@/stores/studio/use-ecom-scene-store";
 import { useActiveEcomStyles } from "@/stores/studio/use-ecom-style-store";
 import { useEcomStudioStore, useStudioDigests } from "@/stores/studio/use-ecom-studio-store";
@@ -19,6 +20,7 @@ import { useEcomStudioStore, useStudioDigests } from "@/stores/studio/use-ecom-s
 export function useEcomLook() {
     const platformId = useEcomStudioStore((state) => state.platformId);
     const sceneId = useEcomStudioStore((state) => state.sceneId);
+    const scenePerson = useEcomStudioStore((state) => state.scenePerson);
     const linkScene = useEcomStudioStore((state) => state.linkScene);
     const styleId = useEcomStudioStore((state) => state.styleId);
     const analysis = useEcomStudioStore((state) => state.analysis);
@@ -30,6 +32,16 @@ export function useEcomLook() {
     const look: EcomLook = useMemo(() => composeLook({ platformId, sceneId, analysis, digests, linkProps: linkScene, scenes }), [analysis, digests, linkScene, platformId, sceneId, scenes]);
 
     const customStyle = useMemo<EcomStyle | undefined>(() => (styleId ? styles.find((item) => item.id === styleId) : undefined), [styleId, styles]);
+    const productOnly = customStyle ? customStyle.id === "clean-white" : sceneFamilyOf(look.scene) === "studio";
+    const personNote = productOnly
+        ? "This is a product-only studio shot. Keep all people, hands and human reflections out of the frame, including anyone shown in a scene reference."
+        : scenePerson === "none"
+          ? ""
+          : [
+                `Include one attractive young adult ${scenePerson === "male" ? "man" : "woman"} in their twenties as a commercial lifestyle model. Prefer Western or other international casting for overseas e-commerce. Use natural grooming, a relaxed expression and everyday styling suited to the setting.`,
+                "Keep the model beside or behind the product, visually secondary and slightly softer in focus. Use realistic scale and match the scene lighting. Leave the product silhouette, controls, ports and branding unobstructed, even if an interaction is shown.",
+                "This explicit model choice takes precedence over people in reference images and any product-only wording in the platform or recipe. Preserve the product, its camera angle and its framing. Show only as much of the model as the existing composition allows.",
+            ].join("\n");
 
     /*
      * 配方接管「画面内容」，不接管「画面规矩」。
@@ -59,6 +71,8 @@ export function useEcomLook() {
         sceneUsed: look.scene,
         dressing: look.dressing,
         customStyle,
+        productOnly,
+        personNote,
         /** 实际参与提示词的配方：自定义优先，否则用平台 × 场景合成的。 */
         effectiveStyle: customStyle ?? look.style,
         notes,

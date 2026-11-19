@@ -71,6 +71,7 @@ export type EcomReferenceDigest = {
 
 /** keep：保持原图机位；change：按推荐机位重投影。 */
 export type EcomAnglePolicy = "keep" | "change";
+export type EcomScenePerson = "none" | "male" | "female";
 
 /** 产品在画面里的占比档位；auto 表示跟随风格，不写构图块。 */
 export type EcomSubjectScale = "auto" | "small" | "medium" | "large";
