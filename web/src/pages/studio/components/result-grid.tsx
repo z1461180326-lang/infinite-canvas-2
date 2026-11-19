@@ -1,11 +1,12 @@
-import { App, Button, Image, Modal, Tooltip } from "antd";
-import { BookmarkPlus, Braces, Download, FolderPlus, Images, Maximize2, Sparkles, Trash2 } from "lucide-react";
+import { App, Button, Image, Modal, Select, Tooltip } from "antd";
+import { BookmarkPlus, Braces, Columns2, Download, FolderPlus, Images, Maximize2, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PromptTemplateDialog, type PromptTemplateDraft } from "@/components/prompts/prompt-template-dialog";
 import { parseAspectRatio } from "@/lib/media-size";
 import { cn } from "@/lib/utils";
+import { resolveImageUrl } from "@/services/image-storage";
 import { useEcomStudioStore, type StudioResult } from "@/stores/studio/use-ecom-studio-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { usePromptLibraryStore } from "@/stores/use-prompt-library-store";
@@ -154,12 +155,22 @@ function PendingCard({ ratio, aspect, index }: { ratio: string; aspect: number; 
     );
 }
 
-export function ResultGrid() {
+function archiveKey(item: StudioResult) {
+    if (item.productSku) return `sku:${JSON.stringify([item.productBrand?.toLowerCase() || "", item.productSku.toLowerCase()])}`;
+    if (item.productProfileId) return `profile:${item.productProfileId}`;
+    if (item.productName) return `draft:${item.productName}`;
+    return "unassigned";
+}
+
+function archiveLabel(item: StudioResult) {
+    return [item.productSku, item.productName, item.productBrand].filter(Boolean).join(" · ");
+}
+
+export function ResultGrid({ outputCount }: { outputCount: number }) {
     const { t } = useTranslation();
     const { message } = App.useApp();
     const results = useEcomStudioStore((state) => state.results);
     const generating = useEcomStudioStore((state) => state.generating);
-    const count = useEcomStudioStore((state) => state.count);
     const ratio = useEcomStudioStore((state) => state.ratio);
     const clearResults = useEcomStudioStore((state) => state.clearResults);
     const removeResult = useEcomStudioStore((state) => state.removeResult);
@@ -167,8 +178,20 @@ export function ResultGrid() {
     const addPromptTemplate = usePromptLibraryStore((state) => state.addPrompt);
     const [promptOf, setPromptOf] = useState<StudioResult | null>(null);
     const [templateOf, setTemplateOf] = useState<StudioResult | null>(null);
+    const [comparison, setComparison] = useState<{ item: StudioResult; source: string } | null>(null);
+    const [filter, setFilter] = useState("all");
     const elapsed = useElapsedSeconds(generating);
     const { ref: gridRef, count: columnCount } = useColumnCount();
+    const archives = useMemo(() => {
+        const entries = new Map<string, string>();
+        for (const item of results) {
+            const key = archiveKey(item);
+            if (!entries.has(key)) entries.set(key, archiveLabel(item) || t("studio.result.unassigned"));
+        }
+        return entries;
+    }, [results, t]);
+    const activeFilter = archives.has(filter) ? filter : "all";
+    const shown = useMemo(() => activeFilter === "all" ? results : results.filter((item) => archiveKey(item) === activeFilter), [activeFilter, results]);
 
     /*
      * 只有真正新出的图才播淡入。分列是按高度贪心算的，新增一张会让后面的卡换列、
@@ -186,9 +209,9 @@ export function ResultGrid() {
     const saveToAssets = (item: StudioResult) => {
         addAsset({
             kind: "image",
-            title: `${item.styleName} · ${item.ratio}`,
+            title: [item.productSku, item.styleName, item.ratio].filter(Boolean).join(" · "),
             coverUrl: item.dataUrl,
-            tags: ["电商生图", item.styleName],
+            tags: ["电商生图", item.styleName, ...(item.productSku ? [item.productSku] : [])],
             source: "ecom-studio",
             data: { dataUrl: item.dataUrl, storageKey: item.storageKey, width: item.width, height: item.height, bytes: item.bytes, mimeType: item.mimeType },
             metadata: { prompt: item.prompt, extraPrompt: item.extraPrompt, styleId: item.styleId, ratio: item.ratio, anglePolicy: item.anglePolicy },
@@ -199,8 +222,19 @@ export function ResultGrid() {
     const download = (item: StudioResult) => {
         const link = document.createElement("a");
         link.href = item.dataUrl;
-        link.download = `ecom-${item.styleId}-${item.ratio.replace(":", "x")}-${item.id}.png`;
+        const suffix = item.mimeType === "image/jpeg" ? "jpg" : item.mimeType === "image/webp" ? "webp" : "png";
+        const name = (item.productSku || "ecom").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_");
+        link.download = `${name}-${item.productView || "image"}-${item.ratio.replace(":", "x")}-${item.id}.${suffix}`;
         link.click();
+    };
+
+    const compareWithSource = async (item: StudioResult) => {
+        const source = await resolveImageUrl(item.sourceStorageKey).catch(() => "");
+        if (!source) {
+            message.warning(t("studio.result.sourceMissing"));
+            return;
+        }
+        setComparison({ item, source });
     };
 
     /*
@@ -224,16 +258,16 @@ export function ResultGrid() {
     };
 
     // 一次请求出 count 张，所以生成中就摆 count 个位，而不是只放一个打转的圈
-    const pending = generating ? count : 0;
+    const pending = generating ? outputCount : 0;
     const pendingAspect = aspectOfRatio(ratio);
 
     const buckets = useMemo(() => {
         const cells = [
             ...Array.from({ length: pending }, (_, index) => ({ key: `pending-${index}`, kind: "pending" as const, index, aspect: pendingAspect })),
-            ...results.map((item) => ({ key: item.id, kind: "result" as const, item, aspect: aspectOf(item) })),
+            ...shown.map((item) => ({ key: item.id, kind: "result" as const, item, aspect: aspectOf(item) })),
         ];
         return distribute(cells, columnCount);
-    }, [columnCount, pending, pendingAspect, results]);
+    }, [columnCount, pending, pendingAspect, shown]);
 
     if (!results.length && !pending) {
         return (
@@ -258,15 +292,30 @@ export function ResultGrid() {
                             {t("studio.result.working")}
                         </span>
                         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                            {t("studio.result.workingMeta", { count, seconds: elapsed })}
+                            {t("studio.result.workingMeta", { count: outputCount, seconds: elapsed })}
                         </span>
                     </>
                 ) : (
                     <>
-                        <span className="text-xs tabular-nums text-muted-foreground">{t("studio.result.count", { count: results.length })}</span>
-                        <Button size="small" type="text" className="!h-6 !px-1.5 text-xs" onClick={clearResults}>
-                            {t("studio.result.clear")}
-                        </Button>
+                        <div className="flex min-w-0 items-center gap-2">
+                            <Select<string>
+                                size="small"
+                                className="w-44 max-w-full"
+                                aria-label={t("studio.result.filterBySku")}
+                                value={activeFilter}
+                                onChange={setFilter}
+                                options={[
+                                    { value: "all", label: t("studio.result.allProducts") },
+                                    ...Array.from(archives, ([value, label]) => ({ value, label })),
+                                ]}
+                            />
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{t("studio.result.count", { count: shown.length })}</span>
+                        </div>
+                        {activeFilter === "all" ? (
+                            <Button size="small" type="text" className="!h-6 !px-1.5 text-xs" onClick={clearResults}>
+                                {t("studio.result.clear")}
+                            </Button>
+                        ) : null}
                     </>
                 )}
             </div>
@@ -326,9 +375,17 @@ export function ResultGrid() {
                                         </div>
                                     </div>
                                     <figcaption className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
-                                        <span className="min-w-0 truncate">{cell.item.styleName}</span>
+                                        <span className="min-w-0 flex-1 truncate" title={archiveLabel(cell.item) || cell.item.styleName}>
+                                            {cell.item.productSku || cell.item.productName || cell.item.styleName}
+                                            {cell.item.productView ? ` · ${t(`studio.product.views.${cell.item.productView}`)}` : ""}
+                                        </span>
                                         <span className="opacity-40">·</span>
                                         <span className="shrink-0 tabular-nums">{cell.item.ratio}</span>
+                                        {cell.item.sourceStorageKey ? (
+                                            <Tooltip title={t("studio.result.compare")}>
+                                                <Button size="small" type="text" className="!h-5 !w-5 shrink-0" aria-label={t("studio.result.compare")} icon={<Columns2 className="size-3.5" />} onClick={() => void compareWithSource(cell.item)} />
+                                            </Tooltip>
+                                        ) : null}
                                     </figcaption>
                                 </figure>
                             ),
@@ -341,6 +398,21 @@ export function ResultGrid() {
             {generating ? (
                 <p className="px-0.5 text-xs leading-5 text-muted-foreground">{elapsed >= 45 ? t("studio.result.workingSlow") : t("studio.result.workingHint")}</p>
             ) : null}
+
+            <Modal open={Boolean(comparison)} title={t("studio.result.compare")} onCancel={() => setComparison(null)} width={1000} footer={null}>
+                {comparison ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <figure className="min-w-0">
+                            <figcaption className="mb-1 text-sm font-medium">{t("studio.result.originalImage")}</figcaption>
+                            <Image src={comparison.source} alt={comparison.item.sourceImageName || t("studio.result.originalImage")} className="max-h-[62vh] w-full object-contain" />
+                        </figure>
+                        <figure className="min-w-0">
+                            <figcaption className="mb-1 text-sm font-medium">{t(comparison.item.preservedOriginal ? "studio.result.compositedImage" : "studio.result.generatedImage")}</figcaption>
+                            <Image src={comparison.item.dataUrl} alt={t("studio.result.generatedImage")} className="max-h-[62vh] w-full object-contain" />
+                        </figure>
+                    </div>
+                ) : null}
+            </Modal>
 
             <Modal
                 open={Boolean(promptOf)}

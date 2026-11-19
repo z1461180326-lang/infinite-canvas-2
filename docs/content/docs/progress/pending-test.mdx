@@ -5,6 +5,9 @@ description: Implemented changes that still need manual verification
 
 # Pending Tests
 
+- Preserve original: select a transparent source and the Clean White recipe, enable Preserve original and generate with no image model configured. The PNG should keep all geometry and labels with pure white around the cutout. Try the angled, front and rear sources. For a model-assisted scene, only the background inputs should be sent for generation. A nontransparent photo should stop before the generation request.
+- SKU result history: generate results for two saved profiles and filter each SKU. The comparison dialog should show the exact original used for each result after selecting another photo and reloading. Older results should remain accessible from All products and Unassigned.
+
 - Scene model: choose a lifestyle scene and switch between No model, Young man and Young woman. Copy the scene prompt and verify that a chosen adult model remains beside or behind the product and that the selected option returns after reloading. Studio and Clean White should keep the product-only prompt, and returning to an eligible scene restores the previous model preference.
 
 - Import a product pack, select it from the profile list and open each saved view. The chosen view is the generation source, and its brief appears under `[Selected product photo]`. Save a view for a second SKU and switch back after reloading. Switching between views of one SKU keeps its style references, switching SKUs clears the working inputs, and deleting an unrelated asset must not remove saved photos.

@@ -31,6 +31,14 @@ export type StudioResult = {
     bytes: number;
     mimeType: string;
     prompt: string;
+    sourceStorageKey?: string;
+    sourceImageName?: string;
+    productProfileId?: string;
+    productSku?: string;
+    productBrand?: string;
+    productName?: string;
+    productView?: EcomProductView;
+    preservedOriginal?: boolean;
     /** 生成时手写补充的原文快照，留空表示这次没写。 */
     extraPrompt?: string;
     styleId: string;
@@ -106,6 +114,7 @@ type EcomStudioStore = {
     withReferenceImage: boolean;
     /** 是否保留风格自带的展示台（亚克力垫块/石膏台）。默认关，产品直接落在场景表面上。 */
     showRiser: boolean;
+    preserveProduct: boolean;
     model: string;
     /** 识别（看图拆解）用的多模态模型，空表示按 text 能力自动取。 */
     visionModel: string;
@@ -153,6 +162,7 @@ type EcomStudioStore = {
     setExtraPrompt: (text: string) => void;
     setWithReferenceImage: (value: boolean) => void;
     setShowRiser: (value: boolean) => void;
+    setPreserveProduct: (value: boolean) => void;
     setModel: (model: string) => void;
     setVisionModel: (model: string) => void;
 
@@ -186,6 +196,7 @@ const PREFERENCE_DEFAULTS = {
     subjectBox: null as EcomSubjectBox | null,
     withReferenceImage: false,
     showRiser: false,
+    preserveProduct: false,
     model: "",
     visionModel: "",
 };
@@ -373,6 +384,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
             setExtraPrompt: (text) => set({ extraPrompt: text.slice(0, ECOM_EXTRA_PROMPT_MAX) }),
             setWithReferenceImage: (value) => set({ withReferenceImage: value }),
             setShowRiser: (value) => set({ showRiser: value }),
+            setPreserveProduct: (preserveProduct) => set({ preserveProduct }),
             setModel: (model) => set({ model }),
             setVisionModel: (visionModel) => set({ visionModel }),
 
@@ -443,6 +455,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                 subjectBox: state.subjectBox,
                 withReferenceImage: state.withReferenceImage,
                 showRiser: state.showRiser,
+                preserveProduct: state.preserveProduct,
                 model: state.model,
                 visionModel: state.visionModel,
                 productProfile: state.productProfile,

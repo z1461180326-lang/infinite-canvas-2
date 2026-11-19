@@ -6,16 +6,17 @@ import { useTranslation } from "react-i18next";
 
 import { findEcomAngle } from "@/constant/ecom/categories";
 import { PageHeader } from "@/components/layout/page-header";
-import { composeFramedProduct } from "@/lib/ecom/frame-compose";
+import { supportsImageEditModel } from "@/lib/canvas/image-edit-preferences";
+import { compositeLayout, compositeProduct, composeFramedProduct, readProductCutout } from "@/lib/ecom/frame-compose";
 import { describeSubjectBox, displaySubjectBox } from "@/lib/ecom/framing";
-import { buildEcomPrompt, normalizeExtraPrompt } from "@/lib/ecom/prompt-builder";
+import { buildEcomBackdropPrompt, buildEcomPrompt, normalizeExtraPrompt } from "@/lib/ecom/prompt-builder";
 import { paletteOf, pickPaletteForProduct } from "@/lib/ecom/style-match";
 import { useEcomLook } from "@/lib/ecom/use-look";
 import { adaptMediaSizeToModel, imageSizePresets, parsePixelSize } from "@/lib/media-size";
 import { cn } from "@/lib/utils";
 import { digestAngleOf } from "@/services/api/ecom";
-import { ECOM_ENDPOINT_LABEL, requestEcomImage } from "@/services/api/ecom-image";
-import { uploadImage } from "@/services/image-storage";
+import { ECOM_ENDPOINT_LABEL, requestEcomImage, type EcomImageResponse } from "@/services/api/ecom-image";
+import { imageToDataUrl, uploadImage } from "@/services/image-storage";
 import { useEcomStudioStore } from "@/stores/studio/use-ecom-studio-store";
 import { isModelChannelConfigured, modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
@@ -41,6 +42,8 @@ export default function EcomStudioPage() {
     const productImage = useEcomStudioStore((state) => state.productImage);
     const analysis = useEcomStudioStore((state) => state.analysis);
     const productProfile = useEcomStudioStore((state) => state.productProfile);
+    const productProfileId = useEcomStudioStore((state) => state.activeProductProfileId);
+    const productView = useEcomStudioStore((state) => state.productView);
     const productViewBrief = useEcomStudioStore((state) =>
         state.productView ? state.savedProductProfiles.find((entry) => entry.id === state.activeProductProfileId)?.photos?.[state.productView]?.brief : undefined,
     );
@@ -56,6 +59,7 @@ export default function EcomStudioPage() {
     const subjectBox = useEcomStudioStore((state) => state.subjectBox);
     const withReferenceImage = useEcomStudioStore((state) => state.withReferenceImage);
     const showRiser = useEcomStudioStore((state) => state.showRiser);
+    const preserveProduct = useEcomStudioStore((state) => state.preserveProduct);
     const extraPrompt = useEcomStudioStore((state) => state.extraPrompt);
     const model = useEcomStudioStore((state) => state.model);
     const generating = useEcomStudioStore((state) => state.generating);
@@ -86,7 +90,9 @@ export default function EcomStudioPage() {
     const activeModel = model || config.model || config.imageModel;
     // 凭据挂在渠道上，不是顶层字段：按模型反查渠道才是准确判断
     const channelReady = isModelChannelConfigured(config, activeModel);
-    const ready = Boolean(productImage && style && channelReady);
+    const localWhite = preserveProduct && customStyle?.id === "clean-white";
+    const outputCount = localWhite ? 1 : count;
+    const ready = Boolean(productImage && style && (localWhite || channelReady));
 
     const buildRequestConfig = useCallback((): AiConfig => {
         const rawSize = imageSizePresets[scale]?.[ratio] ?? imageSizePresets["2k"]["1:1"];
@@ -108,7 +114,7 @@ export default function EcomStudioPage() {
             message.warning(t("studio.generate.missingInput"));
             return;
         }
-        if (!channelReady) {
+        if (!channelReady && !localWhite) {
             message.warning(t("studio.generate.missingChannel"));
             return;
         }
@@ -120,52 +126,69 @@ export default function EcomStudioPage() {
         setGenerating(true);
         setGenerateError(undefined);
         try {
-            /*
-             * 构图动过就先把产品按框合成进成片画布，再照这张图生成。
-             * 提示词里的百分比对模型只是弱约束，它常按自己的审美重新构图；布局一旦画进输入图，
-             * 模型要做的只剩「把白底换成场景」，位置与大小才真的咬得住。
-             * 没动过构图、或合成失败（跨域 / 解码 / 画布不可用）时照旧提交原图，行为与以前一致。
-             */
-            const composed = activeFraming ? await composeFramedProduct({ source: productImage.dataUrl, box: activeFraming, ratio, size: parsePixelSize(buildRequestConfig().size) }) : null;
-            const framingLocked = Boolean(composed);
-
-            const prompt = buildEcomPrompt({
-                analysis: analysis ?? { category: "other", subject: "the product" },
-                profile: productProfile,
-                productViewBrief,
-                personNote,
-                style,
-                angle: angleId,
-                palette,
-                digests,
-                anglePolicy,
-                withReferenceImage,
-                showRiser,
-                // 留空时与旧版提示词逐字一致，等于这个功能不存在
-                extraPrompt,
-                // 构图默认「自动 + 居中」，此时不产生 [Framing]，同样逐字一致
-                frameRatio: ratio,
-                subjectScale,
-                subjectAnchor,
-                subjectBox: composed ? activeFraming : subjectBox,
-                framingLocked,
-                // 平台 × 场景路径才有这三段；用自定义配方时全部为空串，提示词与旧版一致
-                platformNote: notes.platformNote,
-                propsNote: notes.propsNote,
-                colorNotes: notes.colorNotes,
-            });
-
-            // 只有模型支持多图时才把参考图一起提交，否则只发产品图，任何 edit 模型都能用
-            const referenceImages: ReferenceImage[] = withReferenceImage ? references.filter((item) => item.status === "done").map((item) => item.image) : [];
-            const submit: ReferenceImage[] = [composed ? { ...productImage, dataUrl: composed.dataUrl } : productImage, ...referenceImages];
-
-            // 中转站按模型声明兼容端点，这里按模型自动挑能用的那条，不假设一定是 images/edits
-            const { images, endpoint } = await requestEcomImage(buildRequestConfig(), prompt, submit, { signal: controller.signal });
-            setLastEndpoint(ECOM_ENDPOINT_LABEL[endpoint]);
+            const request = buildRequestConfig();
+            const size = parsePixelSize(localWhite ? imageSizePresets[scale]?.[ratio] ?? "" : request.size);
+            const canSendReferences = withReferenceImage && supportsImageEditModel(config, activeModel, "reference", 2);
+            const referenceImages = canSendReferences ? references.filter((item) => item.status === "done").map((item) => item.image) : [];
+            let prompt: string;
+            let images: EcomImageResponse["images"];
+            let endpoint: EcomImageResponse["endpoint"] | undefined;
+            if (preserveProduct) {
+                const cutout = await readProductCutout(productImage.dataUrl);
+                controller.signal.throwIfAborted();
+                if (!cutout) throw new Error(t("studio.generate.transparentRequired"));
+                const box = displaySubjectBox({ box: subjectBox, scale: subjectScale, anchor: subjectAnchor, ratio });
+                if (localWhite) {
+                    prompt = t("studio.generate.localWhitePrompt");
+                    images = [{ id: nanoid(), dataUrl: await compositeProduct(cutout, box, ratio, size) }];
+                } else {
+                    prompt = buildEcomBackdropPrompt({
+                        style, palette, digests, personNote, showRiser, extraPrompt,
+                        propsNote: notes.propsNote,
+                        withReferenceImage: referenceImages.length > 0,
+                        placement: compositeLayout(cutout, box, ratio, size),
+                    });
+                    const background = await requestEcomImage(request, prompt, referenceImages, { signal: controller.signal });
+                    endpoint = background.endpoint;
+                    images = await Promise.all(background.images.map(async (image) => ({
+                        id: image.id,
+                        dataUrl: await compositeProduct(cutout, box, ratio, size, await imageToDataUrl(image, { signal: controller.signal })),
+                    })));
+                }
+            } else {
+                // 手动构图时先把产品摆到指定位置，再把画布作为编辑输入。
+                const composed = activeFraming ? await composeFramedProduct({ source: productImage.dataUrl, box: activeFraming, ratio, size }) : null;
+                prompt = buildEcomPrompt({
+                    analysis: analysis ?? { category: "other", subject: "the product" },
+                    profile: productProfile,
+                    productViewBrief,
+                    personNote,
+                    style,
+                    angle: angleId,
+                    palette,
+                    digests,
+                    anglePolicy,
+                    withReferenceImage: referenceImages.length > 0,
+                    showRiser,
+                    extraPrompt,
+                    frameRatio: ratio,
+                    subjectScale,
+                    subjectAnchor,
+                    subjectBox: composed ? activeFraming : subjectBox,
+                    framingLocked: Boolean(composed),
+                    platformNote: notes.platformNote,
+                    propsNote: notes.propsNote,
+                    colorNotes: notes.colorNotes,
+                });
+                const submit: ReferenceImage[] = [composed ? { ...productImage, dataUrl: composed.dataUrl } : productImage, ...referenceImages];
+                ({ images, endpoint } = await requestEcomImage(request, prompt, submit, { signal: controller.signal }));
+            }
+            controller.signal.throwIfAborted();
+            setLastEndpoint(endpoint ? ECOM_ENDPOINT_LABEL[endpoint] : undefined);
             if (!images.length) throw new Error(t("studio.generate.emptyResult"));
             const stamped = await Promise.all(
                 images.map(async (image) => {
-                    const uploaded = await uploadImage(image.dataUrl);
+                    const uploaded = await uploadImage(image.dataUrl, { signal: controller.signal });
                     return {
                         id: nanoid(),
                         dataUrl: uploaded.url,
@@ -175,17 +198,26 @@ export default function EcomStudioPage() {
                         bytes: uploaded.bytes,
                         mimeType: uploaded.mimeType,
                         prompt,
+                        sourceStorageKey: productImage.storageKey,
+                        sourceImageName: productImage.name,
+                        productProfileId,
+                        productSku: productProfile.model.trim(),
+                        productBrand: productProfile.brand.trim(),
+                        productName: productProfile.name.trim(),
+                        productView,
+                        preservedOriginal: preserveProduct,
                         styleId: style.id,
                         styleName: style.name,
                         ratio,
                         requestSize: imageSizePresets[scale]?.[ratio] ?? "",
-                        anglePolicy,
+                        anglePolicy: preserveProduct ? "keep" as const : anglePolicy,
                         // 快照带上这句手写内容：事后看 prompt 时能分清哪段是自己写的
                         extraPrompt: normalizeExtraPrompt(extraPrompt) || undefined,
                         createdAt: new Date().toISOString(),
                     };
                 }),
             );
+            controller.signal.throwIfAborted();
             addResults(stamped);
         } catch (error) {
             const aborted = controller.signal.aborted;
@@ -198,17 +230,22 @@ export default function EcomStudioPage() {
         }
     }, [
         activeFraming,
+        activeModel,
         addResults,
         analysis,
         anglePolicy,
         buildRequestConfig,
         channelReady,
-        count,
+        config,
         digests,
         message,
+        localWhite,
         paletteIndex,
         productImage,
         productProfile,
+        productProfileId,
+        productView,
+        preserveProduct,
         productViewBrief,
         personNote,
         ratio,
@@ -230,12 +267,12 @@ export default function EcomStudioPage() {
         abortRef.current?.abort();
     }, []);
 
-    const angleLabel = anglePolicy === "change" && targetAngle ? findEcomAngle(targetAngle)?.name : undefined;
+    const angleLabel = !preserveProduct && anglePolicy === "change" && targetAngle ? findEcomAngle(targetAngle)?.name : undefined;
     // 构图动过才写进摘要，默认「自动」时摘要与以前一样
     const framingLabel = activeFraming ? t("studio.settings.occupancyRecap", { value: describeSubjectBox(activeFraming) }) : "";
     // 摘要用「配方名」而不是风格名：两条路径的名字要能一眼区分自己走的是哪条
     const lookLabel = customStyle ? customStyle.name : `${look.platform.name} · ${look.scene.name}`;
-    const recap = [lookLabel, angleLabel ?? t("studio.settings.keepAngle"), ratio, scale.toUpperCase(), `×${count}`, framingLabel].filter(Boolean).join("  ·  ");
+    const recap = [lookLabel, preserveProduct ? t("studio.settings.preserveProduct") : angleLabel ?? t("studio.settings.keepAngle"), ratio, scale.toUpperCase(), `×${outputCount}`, framingLabel].filter(Boolean).join("  ·  ");
     // 补充描述生效时单独给一行：它改变了提示词内容，用户需要一眼确认这句确实被带上了
     const hasExtra = Boolean(normalizeExtraPrompt(extraPrompt));
 
@@ -296,13 +333,13 @@ export default function EcomStudioPage() {
                                     </div>
                                     <div className="flex min-w-0 flex-col divide-y divide-border">
                                         <ReferenceSlot config={config} />
-                                        <StudioSettings config={config} onModelChange={setModel} />
+                                        <StudioSettings config={config} onModelChange={setModel} localWhite={localWhite} />
                                     </div>
                                 </div>
                             </div>
 
                             <div className="shrink-0 border-t border-border bg-card p-2.5">
-                                {!channelReady ? (
+                                {!channelReady && !localWhite ? (
                                     <p className="mb-2 flex items-start gap-1.5 rounded-lg border border-border bg-muted/60 px-2 py-1.5 text-xs leading-5 text-muted-foreground">
                                         <AlertTriangle className="mt-0.5 size-3 shrink-0 text-amber-500" />
                                         <span>
@@ -358,7 +395,7 @@ export default function EcomStudioPage() {
                         {/* 结果区：无卡片、无按钮，只有图 */}
                         <div className="flex min-h-0 flex-col lg:overflow-hidden">
                             <div className="min-h-0 flex-1 lg:overflow-y-auto">
-                                <ResultGrid />
+                                <ResultGrid outputCount={outputCount} />
                             </div>
                         </div>
                     </div>

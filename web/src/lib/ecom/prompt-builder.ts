@@ -128,6 +128,27 @@ export function looksLikeProductEdit(text?: string) {
     return PRODUCT_EDIT_HINTS.some((pattern) => pattern.test(value));
 }
 
+export function buildEcomBackdropPrompt({
+    style, palette, digests = [], personNote, showRiser, extraPrompt, withReferenceImage, propsNote, placement,
+}: Pick<BuildEcomPromptInput, "style" | "palette" | "digests" | "personNote" | "showRiser" | "extraPrompt" | "withReferenceImage" | "propsNote"> & {
+    placement: { left: number; top: number; right: number; bottom: number };
+}) {
+    const colors = mergePalette(digests, palette);
+    const extra = normalizeExtraPrompt(extraPrompt);
+    return [
+        "[Background only] Generate the photographic environment and supporting surface. The actual product will be composited afterwards. Do not render any product, stand-in, outline, placeholder, text, logo or watermark.",
+        `Leave this rectangle empty and unobstructed: X ${placement.left}% to ${placement.right}% from the left and Y ${placement.top}% to ${placement.bottom}% from the top. The surface must naturally support the insert at y=${placement.bottom}% of the image. Keep everything, including hands and clothing, behind or beside the reserved rectangle.`,
+        `[Scene] ${style.scene} ${mergeText(digests, "scene")} ${showRiser ? style.riser ?? "" : ""}`,
+        `[Lighting] ${style.lighting} ${mergeText(digests, "lighting")}`,
+        `[Palette] ${colors.main}, ${colors.sub}, ${colors.accent}.`,
+        propsNote?.trim(),
+        withReferenceImage ? "Input images are references for the environment only. Omit their products, branded objects and text." : "",
+        personNote ? `[Scene model] ${personNote} Any product named above means the future insert. A person may stand or sit beside the empty area, with no interaction with an absent product.` : "",
+        extra ? `[Scene notes] ${extra}. Apply only to the surroundings and keep the reserved area clear.` : "",
+        "[Avoid] replacement products, reserved area markers, busy staging, unrealistic scale",
+    ].filter(Boolean).join("\n\n");
+}
+
 export function buildEcomPrompt({ analysis, profile, productViewBrief, personNote, style, angle, palette, digests = [], anglePolicy = "keep", withReferenceImage = false, showRiser = false, extraPrompt = "", frameRatio = "1:1", subjectScale = "auto", subjectAnchor = "center", subjectBox = null, framingLocked = false, platformNote = "", propsNote = "", colorNotes = "" }: BuildEcomPromptInput) {
     const productLabel = imageReferenceLabel(0);
     const referenceLabel = imageReferenceLabel(1);

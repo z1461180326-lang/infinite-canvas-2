@@ -65,6 +65,11 @@ export async function composeFramedProduct({ source, box, ratio, size, trim }: F
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, frame.width, frame.height);
 
+    drawProduct(context, image, crop, box, frame);
+    return { dataUrl: canvas.toDataURL("image/jpeg", 0.94), trim: trim ?? crop };
+}
+
+function productPlacement(image: HTMLImageElement, crop: TrimRect, box: EcomSubjectBox, frame: { width: number; height: number }) {
     const cropWidth = crop.width * image.naturalWidth;
     const cropHeight = crop.height * image.naturalHeight;
     let targetWidth = Math.max(8, (box.w / 100) * frame.width);
@@ -84,12 +89,88 @@ export async function composeFramedProduct({ source, box, ratio, size, trim }: F
     // 产品必须整件落在画面里：宁可整体平移，也不切角
     const left = clamp(centerX - targetWidth / 2, 0, Math.max(0, frame.width - targetWidth));
     const top = clamp(centerY - targetHeight / 2, 0, Math.max(0, frame.height - targetHeight));
+    return { left, top, cropWidth, cropHeight, targetWidth, targetHeight };
+}
 
+function drawProduct(context: CanvasRenderingContext2D, image: HTMLImageElement, crop: TrimRect, box: EcomSubjectBox, frame: { width: number; height: number }) {
+    const { left, top, cropWidth, cropHeight, targetWidth, targetHeight } = productPlacement(image, crop, box, frame);
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = "high";
     context.drawImage(image, crop.left * image.naturalWidth, crop.top * image.naturalHeight, cropWidth, cropHeight, left, top, targetWidth, targetHeight);
+}
 
-    return { dataUrl: canvas.toDataURL("image/jpeg", 0.94), trim: trim ?? crop };
+type ProductCutout = { image: HTMLImageElement; crop: TrimRect };
+
+/** 只取真实 alpha 的范围，不把产品上的白色、黑色或细字当作背景擦除。 */
+export async function readProductCutout(source: string): Promise<ProductCutout | null> {
+    const image = await loadImage(source);
+    const { naturalWidth: width, naturalHeight: height } = image;
+    if (!width || !height) return null;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0);
+    const { data } = context.getImageData(0, 0, width, height);
+
+    let left = width;
+    let right = -1;
+    let top = height;
+    let bottom = -1;
+    let transparentBorder = false;
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const alpha = data[(y * width + x) * 4 + 3];
+            if (alpha === 0) {
+                if (x === 0 || y === 0 || x === width - 1 || y === height - 1) transparentBorder = true;
+                continue;
+            }
+            if (x < left) left = x;
+            if (x > right) right = x;
+            if (y < top) top = y;
+            if (y > bottom) bottom = y;
+        }
+    }
+
+    if (!transparentBorder || right < left || bottom < top) return null;
+    const crop = { left: left / width, top: top / height, width: (right - left + 1) / width, height: (bottom - top + 1) / height };
+    return { image, crop };
+}
+
+export function compositeLayout(cutout: ProductCutout, box: EcomSubjectBox, ratio: string, size?: FramedComposeInput["size"]) {
+    const frame = size ?? framePixelSize(ratio);
+    const { left, top, targetWidth, targetHeight } = productPlacement(cutout.image, cutout.crop, box, frame);
+    const percent = (value: number) => Math.round(value * 100);
+    return {
+        left: percent(left / frame.width),
+        right: percent((left + targetWidth) / frame.width),
+        top: percent(top / frame.height),
+        bottom: percent((top + targetHeight) / frame.height),
+    };
+}
+
+export async function compositeProduct(cutout: ProductCutout, box: EcomSubjectBox, ratio: string, size?: FramedComposeInput["size"], background?: string) {
+    const frame = size ?? framePixelSize(ratio);
+    const canvas = document.createElement("canvas");
+    canvas.width = frame.width;
+    canvas.height = frame.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("2D canvas is unavailable");
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, frame.width, frame.height);
+    if (background) {
+        const image = await loadImage(background);
+        const scale = Math.max(frame.width / image.naturalWidth, frame.height / image.naturalHeight);
+        const width = image.naturalWidth * scale;
+        const height = image.naturalHeight * scale;
+        context.drawImage(image, (frame.width - width) / 2, (frame.height - height) / 2, width, height);
+    }
+
+    drawProduct(context, cutout.image, cutout.crop, box, frame);
+    return canvas.toDataURL("image/png");
 }
 
 function clamp(value: number, min: number, max: number) {

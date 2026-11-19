@@ -28,7 +28,7 @@ export const SCALE_LABEL_KEY: Record<EcomSubjectScale, string> = {
     large: "studio.settings.occupancyLarge",
 };
 
-export function StudioSettings({ config, onModelChange }: { config: AiConfig; onModelChange: (model: string) => void }) {
+export function StudioSettings({ config, onModelChange, localWhite }: { config: AiConfig; onModelChange: (model: string) => void; localWhite: boolean }) {
     const { t } = useTranslation();
     const [advanced, setAdvanced] = useState(false);
 
@@ -39,6 +39,8 @@ export function StudioSettings({ config, onModelChange }: { config: AiConfig; on
     const ratio = useEcomStudioStore((state) => state.ratio);
     const scale = useEcomStudioStore((state) => state.scale);
     const count = useEcomStudioStore((state) => state.count);
+    const preserveProduct = useEcomStudioStore((state) => state.preserveProduct);
+    const setPreserveProduct = useEcomStudioStore((state) => state.setPreserveProduct);
     const subjectScale = useEcomStudioStore((state) => state.subjectScale);
     const subjectAnchor = useEcomStudioStore((state) => state.subjectAnchor);
     const subjectBox = useEcomStudioStore((state) => state.subjectBox);
@@ -94,6 +96,16 @@ export function StudioSettings({ config, onModelChange }: { config: AiConfig; on
 
     return (
         <StudioSection index="05" title={t("studio.settings.title")}>
+            <div className="mb-2 rounded-lg border border-border/70 px-2 py-1.5">
+                <label className="flex items-center justify-between gap-2 text-sm text-foreground">
+                    {t("studio.settings.preserveProduct")}
+                    <Switch size="small" checked={preserveProduct} onChange={setPreserveProduct} aria-label={t("studio.settings.preserveProduct")} />
+                </label>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {t(localWhite ? "studio.settings.preserveWhiteHint" : "studio.settings.preserveProductHint")}
+                </p>
+            </div>
+            <div hidden={preserveProduct}>
             <span className={FIELD_LABEL}>{t("studio.settings.angle")}</span>
             {/* 分段控件比两个各自带框的按钮更能表达「二选一」；窄栏里两个选项等宽并排，不再上下错行 */}
             <div className="flex rounded-lg border border-border/80 bg-muted/40 p-0.5">
@@ -131,6 +143,7 @@ export function StudioSettings({ config, onModelChange }: { config: AiConfig; on
                     <p className={cn("text-xs leading-4", allRisky ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")}>{allRisky ? t("studio.settings.allRisky") : t("studio.settings.changeAngleHint")}</p>
                 </div>
             )}
+            </div>
 
             <div className="mt-2 grid grid-cols-2 gap-1.5">
                 <label className="min-w-0">
@@ -139,11 +152,13 @@ export function StudioSettings({ config, onModelChange }: { config: AiConfig; on
                 </label>
                 <label className="min-w-0">
                     <span className={FIELD_LABEL}>{t("studio.settings.count")}</span>
-                    <InputNumber size="small" className="w-full" min={1} max={4} value={count} onChange={(value) => setCount(Number(value) || 1)} />
+                    <InputNumber size="small" className="w-full" min={1} max={4} disabled={localWhite} value={localWhite ? 1 : count} onChange={(value) => setCount(Number(value) || 1)} />
                 </label>
                 <label className="col-span-2 min-w-0">
                     <span className={FIELD_LABEL}>{t("studio.settings.resolution")}</span>
-                    <Select size="small" className="w-full" value={scale} onChange={setScale} options={scaleOptions} />
+                        <Select size="small" className="w-full" value={scale} onChange={setScale} options={localWhite ? Object.keys(imageSizePresets).map((value) => ({
+                            value, label: `${value.toUpperCase()} · ${imageSizePresets[value][ratio]?.replace("x", " × ") ?? ratio}`,
+                        })) : scaleOptions} />
                 </label>
             </div>
 
