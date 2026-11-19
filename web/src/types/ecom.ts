@@ -47,6 +47,11 @@ export type EcomProductProfile = {
     audience: string;
 };
 
+export const ECOM_PRODUCT_VIEWS = ["front", "angled", "rear", "detail"] as const;
+export type EcomProductView = (typeof ECOM_PRODUCT_VIEWS)[number];
+export type EcomProductPhoto = { storageKey: string; name: string; type: string; brief?: string };
+export type EcomProductPhotos = Partial<Record<EcomProductView, EcomProductPhoto>>;
+
 /** 参考图拆解模式，每种模式只允许写对应字段。 */
 export type EcomReferenceMode = "style" | "scene" | "layout" | "color" | "texture";
 

@@ -1,3 +1,4 @@
+import { nanoid } from "nanoid";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -7,8 +8,8 @@ import { ECOM_SCENE_DEFAULT, type EcomSceneId } from "@/constant/ecom/scenes";
 import { boxFromScale } from "@/lib/ecom/framing";
 import { ECOM_EXTRA_PROMPT_MAX } from "@/lib/ecom/prompt-builder";
 import { localForageStorage } from "@/lib/localforage-storage";
-import { resolveImageUrl } from "@/services/image-storage";
-import type { EcomAnglePolicy, EcomProductAnalysis, EcomProductProfile, EcomReferenceDigest, EcomReferenceMode, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
+import { collectImageStorageKeys, resolveImageUrl } from "@/services/image-storage";
+import type { EcomAnglePolicy, EcomProductAnalysis, EcomProductPhoto, EcomProductPhotos, EcomProductProfile, EcomProductView, EcomReferenceDigest, EcomReferenceMode, EcomSubjectAnchor, EcomSubjectBox, EcomSubjectScale } from "@/types/ecom";
 import type { ReferenceImage } from "@/types/image";
 
 /** 参考图与其拆解进度。拆解失败只影响这一张，不阻塞出图。 */
@@ -42,8 +43,11 @@ export type StudioResult = {
 
 type AnalysisStatus = "idle" | "analyzing" | "done" | "failed";
 
+type SavedProductProfile = { id: string; profile: EcomProductProfile; photos?: EcomProductPhotos };
+
 type EcomStudioStore = {
     productImage?: ReferenceImage;
+    productView?: EcomProductView;
     analysis?: EcomProductAnalysis;
     analysisStatus: AnalysisStatus;
     analysisError?: string;
@@ -57,6 +61,10 @@ type EcomStudioStore = {
     productColor?: string;
     /** 品牌方手动维护的产品身份、卖点与不可变特征。 */
     productProfile: EcomProductProfile;
+    activeProductProfileId?: string;
+    savedProductProfiles: SavedProductProfile[];
+    /** 切换型号后，上一款未完成的图片上传不能写入当前款。 */
+    productInputSession: number;
 
     /**
      * 自建的「视觉配方」风格 id。
@@ -107,13 +115,18 @@ type EcomStudioStore = {
     /** 上次成功出图实际命中的端点，用来告诉用户这个模型到底走的哪条通道。 */
     lastEndpoint?: string;
 
-    setProduct: (image?: ReferenceImage) => void;
+    setProduct: (image?: ReferenceImage, view?: EcomProductView) => void;
     setAnalysis: (analysis: EcomProductAnalysis | undefined) => void;
     setAnalysisStatus: (status: AnalysisStatus, error?: string) => void;
     setCategory: (category: EcomCategoryId, subject?: string) => void;
     /** 写入本地采样的主色；已有 analysis 时顺手补进去，保持单一数据源。 */
     setProductColor: (hex?: string) => void;
     setProductProfile: (patch: Partial<EcomProductProfile>) => void;
+    saveProductProfile: () => void;
+    importProductProfile: (profile: EcomProductProfile, photos: EcomProductPhotos) => void;
+    saveProductView: (id: string, view: EcomProductView, photo: EcomProductPhoto) => void;
+    selectProductProfile: (id?: string) => void;
+    removeProductProfile: (id: string) => void;
 
     selectStyle: (id?: string) => void;
     setPaletteIndex: (index: number) => void;
@@ -152,6 +165,7 @@ type EcomStudioStore = {
 
 /** rehydrate 完成前一律不写盘：否则页面初始化时的 set 会把上次会话的数据覆盖成默认值。 */
 let hydrated = false;
+const STUDIO_STORAGE_KEY = "ecom-studio-settings";
 
 const PREFERENCE_DEFAULTS = {
     /** -1 表示按产品机身明暗自动挑反差最大的一套。 */
@@ -193,26 +207,26 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
             // 手写补充属于本次内容，不算偏好，故意不进 partialize：换产品/刷新后不会悄悄带上一段旧要求
             extraPrompt: "",
             productProfile: EMPTY_PRODUCT_PROFILE,
+            savedProductProfiles: [],
+            productInputSession: 0,
             ...PREFERENCE_DEFAULTS,
 
-            setProduct: (image) =>
+            setProduct: (image, productView) =>
                 set((state) => {
-                    if (state.productImage?.storageKey === image?.storageKey && state.productImage?.dataUrl === image?.dataUrl) return state;
+                    if (state.productImage?.storageKey === image?.storageKey && state.productImage?.dataUrl === image?.dataUrl) return { productView };
                     return {
                         productImage: image,
-                        /*
-                         * 换图保留品类这类文字结论（用户可能已经手动锁过），但必须清掉主色：
-                         * 色号是唯一和这张图强绑定的字段，留着上一件的颜色会直接把新图锁错。
-                         */
-                        analysis: image ? (state.analysis ? { ...state.analysis, mainColor: undefined } : undefined) : undefined,
-                        analysisStatus: image ? state.analysisStatus : "idle",
+                        productView,
+                        // 切换机位时仅保留手动指定的品类，结构、颜色和印字都按新照片识别。
+                        analysis: image && state.categoryLocked && state.analysis ? { category: state.analysis.category, subject: state.analysis.subject } : undefined,
+                        analysisStatus: "idle",
                         analysisError: undefined,
-                        categoryLocked: false,
+                        categoryLocked: Boolean(image && state.categoryLocked),
                         // 采样色属于这张产品图，换图必须清掉，否则会拿上一件的色号锁新图
                         productColor: undefined,
-                        // 更换角度图通常还是同一 SKU，保留档案；明确移除产品时再一起清空
-                        productProfile: image ? state.productProfile : EMPTY_PRODUCT_PROFILE,
-                        references: [],
+                        productProfile: image || state.activeProductProfileId ? state.productProfile : EMPTY_PRODUCT_PROFILE,
+                        productInputSession: image ? state.productInputSession : state.productInputSession + 1,
+                        references: image && state.activeProductProfileId ? state.references : [],
                         // 已生成的结果自带风格与提示词快照，跟当前产品图无关；删产品图不该把历史记录一起清掉
                         results: state.results,
                         targetAngle: undefined,
@@ -241,6 +255,53 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                     return { productColor, analysis: { ...state.analysis, mainColor: productColor } };
                 }),
             setProductProfile: (patch) => set((state) => ({ productProfile: { ...state.productProfile, ...patch } })),
+            saveProductProfile: () =>
+                set((state) => {
+                    const profile = state.productProfile;
+                    if (!profile.name.trim() && !profile.model.trim()) return state;
+                    const id = state.activeProductProfileId ?? nanoid();
+                    return {
+                        activeProductProfileId: id,
+                        savedProductProfiles: state.activeProductProfileId
+                            ? state.savedProductProfiles.map((entry) => (entry.id === id ? { ...entry, profile } : entry))
+                            : [{ id, profile }, ...state.savedProductProfiles],
+                    };
+                }),
+            importProductProfile: (profile, photos) =>
+                set((state) => ({ savedProductProfiles: [{ id: nanoid(), profile, photos }, ...state.savedProductProfiles] })),
+            saveProductView: (id, view, photo) =>
+                set((state) => ({
+                    productView: state.activeProductProfileId === id && state.productImage?.storageKey === photo.storageKey ? view : state.productView,
+                    savedProductProfiles: state.savedProductProfiles.map((entry) =>
+                        entry.id === id ? { ...entry, photos: { ...entry.photos, [view]: photo } } : entry,
+                    ),
+                })),
+            selectProductProfile: (id) =>
+                set((state) => {
+                    const saved = state.savedProductProfiles.find((entry) => entry.id === id);
+                    if ((id && !saved) || id === state.activeProductProfileId) return state;
+                    return {
+                        activeProductProfileId: id,
+                        productProfile: saved?.profile ?? EMPTY_PRODUCT_PROFILE,
+                        productInputSession: state.productInputSession + 1,
+                        productImage: undefined,
+                        productView: undefined,
+                        productColor: undefined,
+                        analysis: undefined,
+                        analysisStatus: "idle",
+                        analysisError: undefined,
+                        categoryLocked: false,
+                        references: [],
+                        anglePolicy: "keep",
+                        targetAngle: undefined,
+                        extraPrompt: "",
+                    };
+                }),
+            removeProductProfile: (id) =>
+                set((state) => ({
+                    activeProductProfileId: state.activeProductProfileId === id ? undefined : state.activeProductProfileId,
+                    savedProductProfiles: state.savedProductProfiles.filter((entry) => entry.id !== id),
+                })),
             setCategory: (category, subject) =>
                 set((state) => ({
                     categoryLocked: true,
@@ -322,12 +383,15 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
             reset: () =>
                 set({
                     productImage: undefined,
+                    productView: undefined,
                     analysis: undefined,
                     analysisStatus: "idle",
                     analysisError: undefined,
                     categoryLocked: false,
                     productColor: undefined,
                     productProfile: EMPTY_PRODUCT_PROFILE,
+                    activeProductProfileId: undefined,
+                    productInputSession: get().productInputSession + 1,
                     references: [],
                     results: [],
                     generating: false,
@@ -343,7 +407,7 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                 }),
         }),
         {
-            name: "ecom-studio-settings",
+            name: STUDIO_STORAGE_KEY,
             /*
              * localforage 是异步的，hydrate 之前页面里的 set（例如自动选中第一个风格）
              * 会把初始默认值直接写回磁盘，把上次会话的数据覆盖掉 —— 结果就是刷新后记录与偏好全没了。
@@ -377,6 +441,8 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
                 model: state.model,
                 visionModel: state.visionModel,
                 productProfile: state.productProfile,
+                activeProductProfileId: state.activeProductProfileId,
+                savedProductProfiles: state.savedProductProfiles,
                 results: state.results.map((item) => ({ ...item, dataUrl: "" })),
             }),
             onRehydrateStorage: () => () => {
@@ -397,6 +463,15 @@ export const useEcomStudioStore = create<EcomStudioStore>()(
         },
     ),
 );
+
+export async function persistentStudioImageKeys() {
+    try {
+        const value = await localForageStorage.getItem(STUDIO_STORAGE_KEY);
+        return collectImageStorageKeys(value ? JSON.parse(value).state : null);
+    } catch {
+        return new Set<string>();
+    }
+}
 
 /** 刷新后旧 blob URL 已失效，按 storageKey 从 IndexedDB 重新取一次。 */
 async function restoreResultUrls() {

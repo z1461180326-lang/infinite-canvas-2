@@ -9,9 +9,11 @@ import { useImageDropPaste } from "@/hooks/use-image-drop-paste";
 import { sampleMainColor } from "@/lib/ecom/main-color";
 import { cn } from "@/lib/utils";
 import { analyzeProduct } from "@/services/api/ecom";
-import { uploadImage } from "@/services/image-storage";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { isModelChannelConfigured, resolveModelForCapability, type AiConfig } from "@/stores/use-config-store";
 import { useEcomStudioStore } from "@/stores/studio/use-ecom-studio-store";
+import { ECOM_PRODUCT_VIEWS, type EcomProductView } from "@/types/ecom";
+import type { ReferenceImage } from "@/types/image";
 import { StudioSection } from "./section";
 
 /** 机位判断低于这个置信度时提示用户确认，避免静默走错保角策略。 */
@@ -19,12 +21,17 @@ const ANGLE_CONFIDENCE_FLOOR = 0.6;
 
 export function ProductUploader({ config }: { config: AiConfig }) {
     const { t } = useTranslation();
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const inputRef = useRef<HTMLInputElement>(null);
-    const analyzingRef = useRef(false);
+    const analyzingRef = useRef<string | undefined>(undefined);
     const [uploading, setUploading] = useState(false);
 
     const productImage = useEcomStudioStore((state) => state.productImage);
+    const productView = useEcomStudioStore((state) => state.productView);
+    const profileId = useEcomStudioStore((state) => state.activeProductProfileId);
+    const savedPhotos = useEcomStudioStore((state) => state.savedProductProfiles.find((entry) => entry.id === state.activeProductProfileId)?.photos);
+    const generating = useEcomStudioStore((state) => state.generating);
+    const saveProductView = useEcomStudioStore((state) => state.saveProductView);
     const analysis = useEcomStudioStore((state) => state.analysis);
     const analysisStatus = useEcomStudioStore((state) => state.analysisStatus);
     const analysisError = useEcomStudioStore((state) => state.analysisError);
@@ -41,11 +48,13 @@ export function ProductUploader({ config }: { config: AiConfig }) {
 
     const runAnalysis = useCallback(
         async (image: NonNullable<typeof productImage>) => {
-            if (analyzingRef.current) return;
-            analyzingRef.current = true;
+            const isCurrent = () => useEcomStudioStore.getState().productImage?.id === image.id;
+            if (!isCurrent() || analyzingRef.current === image.id) return;
+            analyzingRef.current = image.id;
             setAnalysisStatus("analyzing");
             try {
                 const result = await analyzeProduct(visionConfig, image);
+                if (!isCurrent()) return;
                 if (!result) {
                     setAnalysisStatus("failed", t("studio.analysis.parseFailed"));
                     return;
@@ -55,13 +64,22 @@ export function ProductUploader({ config }: { config: AiConfig }) {
                 const previous = useEcomStudioStore.getState().analysis;
                 setAnalysis(locked && previous ? { ...result, category: previous.category, subject: previous.subject || result.subject } : result);
             } catch (error) {
-                setAnalysisStatus("failed", error instanceof Error ? error.message : t("studio.analysis.failed"));
+                if (isCurrent()) setAnalysisStatus("failed", error instanceof Error ? error.message : t("studio.analysis.failed"));
             } finally {
-                analyzingRef.current = false;
+                if (analyzingRef.current === image.id) analyzingRef.current = undefined;
             }
         },
         [setAnalysis, setAnalysisStatus, t, visionConfig],
     );
+
+    const activateImage = useCallback(async (image: ReferenceImage, view?: EcomProductView) => {
+        setProduct(image, view);
+        // 纯像素采样，模型没给出主色时依然可以锁色。
+        const sampled = await sampleMainColor(image.dataUrl);
+        if (useEcomStudioStore.getState().productImage?.id !== image.id) return;
+        if (sampled) setProductColor(sampled);
+        void runAnalysis(image);
+    }, [runAnalysis, setProduct, setProductColor]);
 
     const acceptFile = useCallback(
         async (file: File | undefined) => {
@@ -70,27 +88,56 @@ export function ProductUploader({ config }: { config: AiConfig }) {
                 message.error(t("studio.product.notImage"));
                 return;
             }
+            const { productInputSession } = useEcomStudioStore.getState();
             setUploading(true);
             try {
                 const uploaded = await uploadImage(file);
+                if (useEcomStudioStore.getState().productInputSession !== productInputSession) return;
                 const image = { id: nanoid(), name: file.name, type: uploaded.mimeType, dataUrl: uploaded.url, storageKey: uploaded.storageKey };
-                setProduct(image);
-                /*
-                 * 先本地采一遍主色再识别：识别可能失败、也可能不给色号，而色号是 [Color]
-                 * 里唯一可量化的锚点。纯像素统计只要几十毫秒，等它比赌模型更划算。
-                 */
-                const sampled = await sampleMainColor(image.dataUrl);
-                if (sampled) setProductColor(sampled);
-                void runAnalysis(image);
+                await activateImage(image);
             } catch (error) {
                 message.error(error instanceof Error ? error.message : t("studio.product.uploadFailed"));
             } finally {
                 setUploading(false);
             }
         },
-        [message, runAnalysis, setProduct, setProductColor, t],
+        [activateImage, message, t],
     );
     const { dragging, dropProps } = useImageDropPaste({ onFile: acceptFile });
+
+    async function useSavedView(view: EcomProductView) {
+        const photo = savedPhotos?.[view];
+        if (!photo) return;
+        if (productImage?.storageKey === photo.storageKey) {
+            setProduct(productImage, view);
+            return;
+        }
+        const { productInputSession } = useEcomStudioStore.getState();
+        setUploading(true);
+        try {
+            const dataUrl = await resolveImageUrl(photo.storageKey);
+            if (useEcomStudioStore.getState().productInputSession !== productInputSession) return;
+            if (!dataUrl) throw new Error(t("studio.product.savedViewUnavailable"));
+            await activateImage({ id: nanoid(), name: photo.name, type: photo.type, dataUrl, storageKey: photo.storageKey }, view);
+        } catch {
+            message.error(t("studio.product.savedViewUnavailable"));
+        } finally {
+            setUploading(false);
+        }
+    }
+
+    function saveCurrentView(view: EcomProductView) {
+        if (!profileId || !productImage?.storageKey) return;
+        const photo = { storageKey: productImage.storageKey, name: productImage.name, type: productImage.type };
+        const previous = savedPhotos?.[view];
+        if (previous?.storageKey === photo.storageKey) return;
+        const save = () => {
+            saveProductView(profileId, view, { ...photo, brief: previous?.brief });
+            message.success(t("studio.product.viewSaved"));
+        };
+        if (previous) modal.confirm({ title: t("studio.product.replaceSavedView"), onOk: save });
+        else save();
+    }
 
     // 未配置渠道时不做无意义的识别请求；凭据挂在渠道上，按识别模型反查
     const channelReady = isModelChannelConfigured(config, resolvedVisionModel);
@@ -104,7 +151,7 @@ export function ProductUploader({ config }: { config: AiConfig }) {
 
     return (
         <StudioSection
-            index="01"
+            index="02"
             title={t("studio.product.title")}
             actions={
                 productImage ? (
@@ -144,6 +191,39 @@ export function ProductUploader({ config }: { config: AiConfig }) {
                 }}
             />
 
+            {profileId ? (
+                <div className="mb-2 space-y-1.5">
+                    <div className="flex flex-wrap gap-1">
+                        {ECOM_PRODUCT_VIEWS.filter((view) => savedPhotos?.[view]).map((view) => (
+                            <Button
+                                key={view}
+                                size="small"
+                                type={productView === view ? "primary" : "default"}
+                                disabled={uploading || generating}
+                                aria-pressed={productView === view}
+                                onClick={() => void useSavedView(view)}
+                            >
+                                {t(`studio.product.views.${view}`)}
+                            </Button>
+                        ))}
+                    </div>
+                    {productView && savedPhotos?.[productView]?.brief ? (
+                        <p className="text-xs leading-5 text-muted-foreground">{savedPhotos[productView].brief}</p>
+                    ) : null}
+                    {productImage?.storageKey ? (
+                        <Select<EcomProductView | null>
+                            size="small"
+                            className="w-full"
+                            aria-label={t("studio.product.saveView")}
+                            placeholder={t("studio.product.saveView")}
+                            value={null}
+                            options={ECOM_PRODUCT_VIEWS.map((view) => ({ value: view, label: t(`studio.product.views.${view}`) }))}
+                            onChange={(view) => { if (view) saveCurrentView(view); }}
+                            disabled={uploading || generating}
+                        />
+                    ) : null}
+                </div>
+            ) : null}
             <div {...dropProps} className={cn("rounded-lg transition", dragging && "ring-2 ring-primary/40 ring-offset-2 ring-offset-card")}>
                 {productImage ? (
                     <div className="flex items-start gap-3">

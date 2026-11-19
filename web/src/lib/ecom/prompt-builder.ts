@@ -44,6 +44,7 @@ export type BuildEcomPromptInput = {
     analysis: EcomProductAnalysis;
     /** 品牌方维护的产品身份、卖点与不可变特征。 */
     profile?: EcomProductProfile;
+    productViewBrief?: string;
     style: EcomStyle;
     angle: EcomAngleId;
     palette: EcomPalette;
@@ -126,7 +127,7 @@ export function looksLikeProductEdit(text?: string) {
     return PRODUCT_EDIT_HINTS.some((pattern) => pattern.test(value));
 }
 
-export function buildEcomPrompt({ analysis, profile, style, angle, palette, digests = [], anglePolicy = "keep", withReferenceImage = false, showRiser = false, extraPrompt = "", frameRatio = "1:1", subjectScale = "auto", subjectAnchor = "center", subjectBox = null, framingLocked = false, platformNote = "", propsNote = "", colorNotes = "" }: BuildEcomPromptInput) {
+export function buildEcomPrompt({ analysis, profile, productViewBrief, style, angle, palette, digests = [], anglePolicy = "keep", withReferenceImage = false, showRiser = false, extraPrompt = "", frameRatio = "1:1", subjectScale = "auto", subjectAnchor = "center", subjectBox = null, framingLocked = false, platformNote = "", propsNote = "", colorNotes = "" }: BuildEcomPromptInput) {
     const productLabel = imageReferenceLabel(0);
     const referenceLabel = imageReferenceLabel(1);
     const angleSpec = findEcomAngle(angle);
@@ -181,7 +182,7 @@ export function buildEcomPrompt({ analysis, profile, style, angle, palette, dige
     const productBrief = [
         identity ? `Commercial identity: ${identity}.` : "",
         profile?.sellingPoints ? `Key selling points: ${normalizeExtraPrompt(profile.sellingPoints)}. Show these advantages through the most truthful visible angle, lighting and use context only; never turn them into invented product features, text, badges or diagrams.` : "",
-        profile?.mustKeep ? `Non-negotiable product traits: ${normalizeExtraPrompt(profile.mustKeep)}. Every named trait must remain exactly as photographed in ${productLabel}; scene styling can never cover, replace or reinterpret it.` : "",
+        profile?.mustKeep ? `Non-negotiable product traits: ${normalizeExtraPrompt(profile.mustKeep)}. Every visible named trait must remain exactly as photographed in ${productLabel}. Do not add details from a hidden side just to show them. Scene styling must not replace or reinterpret these traits.` : "",
         profile?.audience ? `Intended buyer and use context: ${normalizeExtraPrompt(profile.audience)}. Use this only to choose believable surroundings and secondary props; do not stereotype a person or redesign the product.` : "",
     ].filter(Boolean);
     const productBriefBlock = productBrief.length ? `[Product brief]\n${productBrief.join("\n")}` : "";
@@ -264,6 +265,7 @@ export function buildEcomPrompt({ analysis, profile, style, angle, palette, dige
         `[Image roles]\n${productLabel} = ${multiItem ? `the set of ${itemCount} products to preserve, all of them` : "the product to preserve"}.${withReferenceImage ? ` ${referenceLabel} = environment reference only, never use it as the subject.` : ""}`,
         productLock,
         ...(productBriefBlock ? [productBriefBlock] : []),
+        ...(productViewBrief ? [`[Selected product photo]\n${normalizeExtraPrompt(productViewBrief)} Follow the product geometry and visibility in ${productLabel}.`] : []),
         `[Product finish]\nKeep the original material and surface finish${finishText ? `: ${finishText}` : ""}. Preserve the original highlight position, intensity and surface grain.\nA matte surface stays matte, a brushed surface keeps its grain direction, a glossy surface keeps its reflection shape. Never change the finish, over-polish the surface, or swap one material for another.`,
         `[Branding]\nKeep every logo, label, print and its position unchanged. Do not add new text, price tags, badges or promotional marks, and never invent characters that are not in ${productLabel}.${analysis.labelText ? `\nThe visible text on the product reads "${analysis.labelText}" — reproduce it without alteration.` : ""}`,
         ...(CONTROL_CATEGORIES.includes(analysis.category)

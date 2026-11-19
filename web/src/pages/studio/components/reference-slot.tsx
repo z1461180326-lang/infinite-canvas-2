@@ -122,13 +122,17 @@ export function ReferenceSlot({ config }: { config: AiConfig }) {
                 message.error(t("studio.product.notImage"));
                 return;
             }
-            if (references.length >= MAX_REFERENCES) {
+            const current = useEcomStudioStore.getState();
+            if (!current.productImage) return;
+            if (current.references.length >= MAX_REFERENCES) {
                 message.warning(t("studio.reference.limit", { count: MAX_REFERENCES }));
                 return;
             }
             setUploading(true);
             try {
                 const uploaded = await uploadImage(file);
+                const latest = useEcomStudioStore.getState();
+                if (latest.productImage?.id !== current.productImage.id || latest.references.length >= MAX_REFERENCES) return;
                 addReference({ id: nanoid(), name: file.name, type: uploaded.mimeType, dataUrl: uploaded.url, storageKey: uploaded.storageKey }, "style");
             } catch (error) {
                 message.error(error instanceof Error ? error.message : t("studio.product.uploadFailed"));
@@ -136,7 +140,7 @@ export function ReferenceSlot({ config }: { config: AiConfig }) {
                 setUploading(false);
             }
         },
-        [addReference, message, references.length, t],
+        [addReference, message, t],
     );
 
     const canAdd = Boolean(productImage) && references.length < MAX_REFERENCES;

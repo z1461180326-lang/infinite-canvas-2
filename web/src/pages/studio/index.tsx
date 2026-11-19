@@ -41,6 +41,9 @@ export default function EcomStudioPage() {
     const productImage = useEcomStudioStore((state) => state.productImage);
     const analysis = useEcomStudioStore((state) => state.analysis);
     const productProfile = useEcomStudioStore((state) => state.productProfile);
+    const productViewBrief = useEcomStudioStore((state) =>
+        state.productView ? state.savedProductProfiles.find((entry) => entry.id === state.activeProductProfileId)?.photos?.[state.productView]?.brief : undefined,
+    );
     const paletteIndex = useEcomStudioStore((state) => state.paletteIndex);
     const anglePolicy = useEcomStudioStore((state) => state.anglePolicy);
     const targetAngle = useEcomStudioStore((state) => state.targetAngle);
@@ -129,6 +132,7 @@ export default function EcomStudioPage() {
             const prompt = buildEcomPrompt({
                 analysis: analysis ?? { category: "other", subject: "the product" },
                 profile: productProfile,
+                productViewBrief,
                 style,
                 angle: angleId,
                 palette,
@@ -204,6 +208,7 @@ export default function EcomStudioPage() {
         paletteIndex,
         productImage,
         productProfile,
+        productViewBrief,
         ratio,
         references,
         scale,
@@ -273,8 +278,8 @@ export default function EcomStudioPage() {
                             <div className="min-h-0 flex-1 overflow-y-auto">
                                 <div className="grid sm:min-h-full sm:grid-cols-2 sm:divide-x sm:divide-border">
                                     <div className="flex min-w-0 flex-col divide-y divide-border">
-                                        <ProductUploader config={config} />
                                         <ProductProfile />
+                                        <ProductUploader config={config} />
                                         {/* 平台 × 场景是主路径；自定义配方排在它下面，选了才生效 */}
                                         <LookPicker onManageScenes={() => { setManagerTab("scene"); setManagerOpen(true); }} />
                                         <StyleGrid categoryId={analysis?.category} coveredFields={coveredFields} onOpenManager={() => { setManagerTab("style"); setManagerOpen(true); }} />
